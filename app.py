@@ -4,7 +4,9 @@ import streamlit as st
 
 from src.pdf_utils import extract_text_from_pdf
 from src.nlp_pipeline import (
+    answer_question,
     extract_keywords,
+    extract_sections,
     retrieve_passages,
     summarize_text,
     find_domain_hints,
@@ -94,20 +96,63 @@ with tabs[1]:
         st.warning("No keywords found. Try a longer document.")
 
 with tabs[2]:
-    st.subheader("Question-style passage retrieval")
-    query = st.text_input(
-        "Ask a question about the uploaded paper(s)",
-        value="What material system and characterization methods are discussed?",
+    st.subheader("Ask the paper")
+    st.caption(
+        "Ask a question in English or Chinese. The answer is generated from retrieved paper evidence."
     )
 
-    if query:
-        results = retrieve_passages(documents, query=query, top_k=top_k)
-        for i, item in enumerate(results, start=1):
-            st.markdown(f"### Result {i}")
-            source_index = item["document_index"]
-            source_name = document_names[source_index]
-            st.caption(f"Source: {source_name} | similarity: {item['score']:.3f}")
-            st.write(item["passage"])
+    example_questions = [
+        "What material system is studied?",
+        "What methods or characterization techniques are used?",
+        "What are the main results?",
+        "What limitations or future work are mentioned?",
+        "这篇文章研究了什么材料体系？",
+        "这篇文章用了什么方法或表征手段？",
+        "这篇文章的主要结果是什么？",
+        "这篇文章有什么局限或未来工作？",
+    ]
+
+    selected_example = st.selectbox(
+        "Example questions",
+        example_questions,
+        index=0,
+    )
+
+    with st.form("qa_form"):
+        query = st.text_area(
+            "Your question",
+            value=selected_example,
+            height=100,
+        )
+
+        submitted = st.form_submit_button("Generate grounded answer")
+
+    if submitted:
+        if not query.strip():
+            st.warning("Please enter a question.")
+        else:
+            qa_result = answer_question(
+                documents=documents,
+                query=query,
+                document_names=document_names,
+                top_k=top_k,
+                max_answer_sentences=4,
+            )
+
+            st.markdown(qa_result["answer"])
+
+            evidence = qa_result.get("evidence", [])
+
+            if evidence:
+                with st.expander("Show retrieved evidence passages", expanded=False):
+                    for i, item in enumerate(evidence, start=1):
+                        source_index = item["document_index"]
+                        source_name = document_names[source_index]
+                        st.markdown(f"#### Evidence passage {i}")
+                        st.caption(
+                            f"Source: {source_name} | similarity: {item['score']:.3f}"
+                        )
+                        st.write(item["passage"])
 
 with tabs[3]:
     st.subheader("Materials-science domain hints")
