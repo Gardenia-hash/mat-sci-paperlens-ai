@@ -10,11 +10,14 @@ from src.text_utils import clean_text, split_passages, split_sentences
 
 
 def summarize_text(text: str, max_sentences: int = 5) -> str:
-    """Create an extractive summary using sentence-level TF-IDF scores."""
+    """Create an extractive summary using filtered sentence-level TF-IDF scores."""
     sentences = split_sentences(text)
 
     if not sentences:
-        return "No readable sentence was found."
+        return (
+            "No clean readable sentence was found. "
+            "The uploaded PDF may contain mostly equations, scanned text, or broken encoding."
+        )
 
     if len(sentences) <= max_sentences:
         return " ".join(sentences)
@@ -23,7 +26,7 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
         vectorizer = TfidfVectorizer(
             stop_words="english",
             ngram_range=(1, 2),
-            max_df=0.95,
+            max_df=0.90,
             min_df=1,
         )
         matrix = vectorizer.fit_transform(sentences)
