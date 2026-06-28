@@ -613,6 +613,444 @@ def retrieve_passages(
 
     return results
 
+QUESTION_TYPE_PATTERNS = {
+    "materials_system": [
+        "material",
+        "materials",
+        "system",
+        "sample",
+        "compound",
+        "film",
+        "structure",
+        "what is studied",
+        "材料",
+        "体系",
+        "样品",
+        "研究对象",
+        "研究了什么",
+    ],
+    "method": [
+        "method",
+        "methods",
+        "approach",
+        "prepared",
+        "fabricated",
+        "synthesized",
+        "characterized",
+        "measured",
+        "simulated",
+        "calculated",
+        "how",
+        "方法",
+        "怎么做",
+        "如何",
+        "制备",
+        "表征",
+        "测量",
+        "模拟",
+        "计算",
+    ],
+    "result": [
+        "result",
+        "results",
+        "finding",
+        "findings",
+        "performance",
+        "show",
+        "shows",
+        "demonstrate",
+        "conclusion",
+        "结果",
+        "发现",
+        "性能",
+        "说明",
+        "证明",
+        "结论",
+    ],
+    "limitation": [
+        "limitation",
+        "limitations",
+        "challenge",
+        "challenges",
+        "problem",
+        "future work",
+        "drawback",
+        "weakness",
+        "限制",
+        "局限",
+        "问题",
+        "挑战",
+        "不足",
+        "未来",
+    ],
+    "parameter": [
+        "parameter",
+        "parameters",
+        "temperature",
+        "field",
+        "current",
+        "voltage",
+        "thickness",
+        "size",
+        "dimension",
+        "frequency",
+        "value",
+        "参数",
+        "设定",
+        "温度",
+        "电流",
+        "电压",
+        "厚度",
+        "尺寸",
+        "数值",
+        "磁场",
+    ],
+}
+
+
+QUERY_EXPANSION_TERMS = {
+    "materials_system": [
+        "material",
+        "sample",
+        "compound",
+        "thin film",
+        "heterostructure",
+        "semiconductor",
+        "ferroelectric",
+        "oxide",
+        "chalcogenide",
+        "wafer",
+    ],
+    "method": [
+        "method",
+        "fabrication",
+        "synthesis",
+        "deposition",
+        "annealing",
+        "lithography",
+        "etching",
+        "characterization",
+        "measurement",
+        "simulation",
+        "calculation",
+        "SEM",
+        "TEM",
+        "XRD",
+        "Raman",
+        "AFM",
+    ],
+    "result": [
+        "result",
+        "show",
+        "demonstrate",
+        "observe",
+        "increase",
+        "decrease",
+        "improve",
+        "enhance",
+        "performance",
+        "stability",
+        "efficiency",
+        "switching",
+    ],
+    "limitation": [
+        "limitation",
+        "challenge",
+        "however",
+        "future work",
+        "requires",
+        "uncertain",
+        "noise",
+        "artifact",
+        "scalability",
+    ],
+    "parameter": [
+        "parameter",
+        "temperature",
+        "current",
+        "voltage",
+        "field",
+        "thickness",
+        "size",
+        "dimension",
+        "frequency",
+        "value",
+        "rate",
+        "time",
+    ],
+    "general": [
+        "study",
+        "paper",
+        "work",
+        "method",
+        "result",
+        "material",
+        "performance",
+    ],
+}
+
+
+ANSWER_BONUS_TERMS = {
+    "materials_system": DOMAIN_KEYWORDS["materials_system"],
+    "method": DOMAIN_KEYWORDS["fabrication_or_synthesis"] + DOMAIN_KEYWORDS["characterization"],
+    "result": DOMAIN_KEYWORDS["results_or_performance"],
+    "limitation": DOMAIN_KEYWORDS["limitations_or_future_work"],
+    "parameter": [
+        "temperature",
+        "current",
+        "voltage",
+        "field",
+        "thickness",
+        "size",
+        "dimension",
+        "frequency",
+        "parameter",
+        "value",
+        "rate",
+        "time",
+    ],
+    "general": [],
+}
+
+
+def infer_question_type(query: str) -> str:
+    """Infer the user's question type from English or Chinese keywords."""
+    lower_query = query.lower()
+
+    for question_type, patterns in QUESTION_TYPE_PATTERNS.items():
+        if any(pattern.lower() in lower_query for pattern in patterns):
+            return question_type
+
+    return "general"
+
+
+def expand_query(query: str, question_type: str) -> str:
+    """Expand a user question with English domain terms.
+
+    This helps Chinese questions retrieve English paper passages.
+    """
+    expansion_terms = QUERY_EXPANSION_TERMS.get(question_type, QUERY_EXPANSION_TERMS["general"])
+    return query + " " + " ".join(expansion_terms)
+
+
+def answer_sentence_bonus(sentence: str, question_type: str) -> float:
+    """Reward sentences that match the detected question intent."""
+    lower_sentence = sentence.lower()
+    bonus_terms = ANSWER_BONUS_TERMS.get(question_type, [])
+
+    bonus = 0.0
+    for term in bonus_terms:
+        if term.lower() in lower_sentence:
+            bonus += 0.08
+
+    # Sentences with direct claim language are often useful answers.
+    claim_terms = [
+        "we show",
+        "we demonstrate",
+        "we find",
+        "we observe",
+        "the results",
+        "this suggests",
+        "indicating that",
+        "therefore",
+        "however",
+    ]
+
+    if any(term in lower_sentence for term in claim_terms):
+        bonus += 0.15
+
+    return min(bonus, 0.5)
+
+
+def deduplicate_answer_sentences(items: List[Dict[str, object]]) -> List[Dict[str, object]]:
+    """Remove repeated or near-identical answer sentences."""
+    seen = set()
+    unique_items = []
+
+    for item in items:
+        sentence = str(item["sentence"])
+        normalized = re.sub(r"[^a-zA-Z0-9]+", " ", sentence.lower()).strip()
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        unique_items.append(item)
+
+    return unique_items
+
+
+def answer_question(
+    documents: List[str],
+    query: str,
+    document_names: List[str] | None = None,
+    top_k: int = 4,
+    max_answer_sentences: int = 4,
+) -> Dict[str, object]:
+    """Generate a grounded answer from retrieved paper passages.
+
+    The answer is extractive and evidence-based. It does not invent facts
+    beyond the uploaded document text.
+    """
+    if not query.strip():
+        return {
+            "answer": "Please enter a question.",
+            "evidence": [],
+            "question_type": "general",
+            "confidence": "Low",
+        }
+
+    question_type = infer_question_type(query)
+    expanded_query = expand_query(query, question_type)
+
+    retrieved = retrieve_passages(
+        documents=documents,
+        query=expanded_query,
+        top_k=top_k,
+    )
+
+    if not retrieved:
+        return {
+            "answer": (
+                "### Grounded answer\n\n"
+                "I could not find relevant evidence in the uploaded document. "
+                "Try asking a more specific question, or upload a cleaner PDF/text file."
+            ),
+            "evidence": [],
+            "question_type": question_type,
+            "confidence": "Low",
+        }
+
+    candidate_items: List[Dict[str, object]] = []
+
+    for passage_item in retrieved:
+        passage = str(passage_item["passage"])
+        doc_index = int(passage_item["document_index"])
+        passage_score = float(passage_item["score"])
+
+        source_name = (
+            document_names[doc_index]
+            if document_names and doc_index < len(document_names)
+            else f"Document {doc_index + 1}"
+        )
+
+        for sentence in split_sentences(passage):
+            sentence = _clean_sentence_for_summary(sentence)
+
+            if _is_bad_summary_sentence(sentence):
+                continue
+
+            candidate_items.append(
+                {
+                    "sentence": sentence,
+                    "source": source_name,
+                    "document_index": doc_index,
+                    "passage_score": passage_score,
+                }
+            )
+
+    if not candidate_items:
+        return {
+            "answer": (
+                "### Grounded answer\n\n"
+                "I found potentially relevant passages, but they were too noisy "
+                "to form a clean answer. The PDF may contain dense formulas, broken text, or scanned content."
+            ),
+            "evidence": retrieved,
+            "question_type": question_type,
+            "confidence": "Low",
+        }
+
+    candidate_sentences = [str(item["sentence"]) for item in candidate_items]
+
+    try:
+        vectorizer = TfidfVectorizer(
+            stop_words="english",
+            ngram_range=(1, 2),
+            max_df=0.95,
+            min_df=1,
+        )
+        matrix = vectorizer.fit_transform(candidate_sentences + [expanded_query])
+        query_vector = matrix[-1]
+        sentence_matrix = matrix[:-1]
+        similarities = cosine_similarity(query_vector, sentence_matrix).ravel()
+    except ValueError:
+        similarities = [0.0] * len(candidate_items)
+
+    scored_items = []
+
+    for index, item in enumerate(candidate_items):
+        sentence = str(item["sentence"])
+        sentence_score = float(similarities[index])
+        passage_score = float(item["passage_score"])
+        bonus = answer_sentence_bonus(sentence, question_type)
+
+        final_score = sentence_score + 0.35 * passage_score + bonus
+
+        scored_item = dict(item)
+        scored_item["answer_score"] = final_score
+        scored_items.append(scored_item)
+
+    scored_items = sorted(
+        scored_items,
+        key=lambda item: float(item["answer_score"]),
+        reverse=True,
+    )
+
+    selected_items = deduplicate_answer_sentences(scored_items)[:max_answer_sentences]
+
+    best_score = float(selected_items[0]["answer_score"]) if selected_items else 0.0
+
+    if best_score >= 0.35:
+        confidence = "High"
+    elif best_score >= 0.18:
+        confidence = "Medium"
+    else:
+        confidence = "Low"
+
+    lines = [
+        "### Grounded answer",
+        "",
+        f"**Detected question type:** `{question_type}`",
+        f"**Confidence:** `{confidence}`",
+        "",
+    ]
+
+    if confidence == "Low":
+        lines.append(
+            "> The answer below is based on weak textual evidence. "
+            "Please verify it against the original paper."
+        )
+        lines.append("")
+
+    lines.append("**Answer:**")
+    for item in selected_items:
+        lines.append(f"- {item['sentence']}")
+
+    lines.append("")
+    lines.append("**Evidence sources:**")
+    used_sources = []
+
+    for item in selected_items:
+        source = str(item["source"])
+        if source not in used_sources:
+            used_sources.append(source)
+
+    for source in used_sources:
+        lines.append(f"- {source}")
+
+    lines.append("")
+    lines.append(
+        "> Note: This QA mode is extractive and grounded. "
+        "It answers by selecting relevant sentences from the uploaded document, not by inventing new claims."
+    )
+
+    return {
+        "answer": "\n".join(lines),
+        "evidence": retrieved,
+        "question_type": question_type,
+        "confidence": confidence,
+    }
 
 def find_domain_hints(text: str, max_snippets_per_category: int = 4) -> Dict[str, List[str]]:
     """Find short snippets related to common materials-science paper sections."""
