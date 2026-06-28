@@ -88,7 +88,7 @@ with tabs[0]:
 with tabs[1]:
     st.subheader("Top keywords and phrases")
     keywords = extract_keywords(combined_text, top_n=max_keywords)
-    if keywords:
+    if not keywords.empty:
         st.dataframe(keywords, use_container_width=True)
     else:
         st.warning("No keywords found. Try a longer document.")
