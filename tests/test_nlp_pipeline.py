@@ -1,4 +1,10 @@
-from src.nlp_pipeline import extract_keywords, retrieve_passages, summarize_text, find_domain_hints
+from src.nlp_pipeline import (
+    answer_question,
+    extract_keywords,
+    retrieve_passages,
+    summarize_text,
+    find_domain_hints,
+)
 
 
 SAMPLE_TEXT = """
@@ -33,3 +39,15 @@ def test_find_domain_hints_has_categories():
     hints = find_domain_hints(SAMPLE_TEXT)
     assert "materials_system" in hints
     assert "characterization" in hints
+
+def test_answer_question_returns_grounded_answer():
+    result = answer_question(
+        [SAMPLE_TEXT],
+        query="What characterization methods are used?",
+        document_names=["sample"],
+        top_k=2,
+    )
+
+    assert "answer" in result
+    assert "evidence" in result
+    assert "Grounded answer" in result["answer"]
