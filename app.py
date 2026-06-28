@@ -83,7 +83,7 @@ tabs = st.tabs(["Summary", "Keywords", "Ask / Search", "Domain Hints", "Text Pre
 with tabs[0]:
     st.subheader("Extractive summary")
     summary = summarize_text(combined_text, max_sentences=max_summary_sentences)
-    st.write(summary)
+    st.markdown(summary)
 
 with tabs[1]:
     st.subheader("Top keywords and phrases")
