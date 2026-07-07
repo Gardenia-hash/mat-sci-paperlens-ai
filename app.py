@@ -165,6 +165,66 @@ with tabs[2]:
                         st.write(item["passage"])
 
 with tabs[3]:
+    st.subheader("Compare papers")
+    st.caption(
+        "Upload two or more papers to compare their research focus, methods, parameters, results, and limitations."
+    )
+
+    if len(documents) < 2:
+        st.info(
+            "Please upload at least two documents to use this comparison mode. "
+            "You can also upload one paper and keep the sample text enabled for testing."
+        )
+    else:
+        max_compare_snippets = st.slider(
+            "Evidence snippets per dimension",
+            min_value=1,
+            max_value=5,
+            value=3,
+        )
+
+        comparison = compare_documents(
+            documents=documents,
+            document_names=document_names,
+            max_snippets_per_dimension=max_compare_snippets,
+        )
+
+        st.markdown("### Core comparison table")
+        st.dataframe(
+            comparison["table"],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("### Keyword overlap and distinctive keywords")
+        st.dataframe(
+            comparison["keyword_table"],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("### Detailed evidence by dimension")
+
+        details = comparison["details"]
+
+        for dimension, document_snippets in details.items():
+            with st.expander(dimension, expanded=False):
+                columns = st.columns(len(document_names))
+
+                for column, doc_name in zip(columns, document_names):
+                    with column:
+                        st.markdown(f"**{doc_name}**")
+                        snippets = document_snippets.get(doc_name, [])
+
+                        if snippets:
+                            for snippet in snippets:
+                                st.markdown(f"- {snippet}")
+                        else:
+                            st.caption("Not clearly detected.")
+
+        st.info(comparison["note"])
+
+with tabs[3]:
     st.subheader("Materials-science domain hints")
     hints = find_domain_hints(combined_text)
     for category, snippets in hints.items():
