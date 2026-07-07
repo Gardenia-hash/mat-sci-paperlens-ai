@@ -224,7 +224,7 @@ with tabs[3]:
 
         st.info(comparison["note"])
 
-with tabs[3]:
+with tabs[4]:
     st.subheader("Materials-science domain hints")
     hints = find_domain_hints(combined_text)
     for category, snippets in hints.items():
@@ -235,7 +235,7 @@ with tabs[3]:
             else:
                 st.caption("No obvious hint detected.")
 
-with tabs[4]:
+with tabs[5]:
     st.subheader("Document preview")
     for name, doc in zip(document_names, documents):
         with st.expander(name, expanded=False):
