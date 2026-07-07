@@ -7,8 +7,6 @@ from src.nlp_pipeline import (
     answer_question,
     compare_documents,
     extract_keywords,
-    extract_sections,
-    retrieve_passages,
     summarize_text,
     find_domain_hints,
 )
@@ -32,7 +30,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown(
-        "Tip: upload a PDF paper, or use the built-in sample text to test the app."
+        "Tip: upload one or more PDF/TXT papers. Multi-paper mode is supported."
     )
 
 
@@ -47,6 +45,15 @@ def read_uploaded_file(uploaded_file) -> str:
         return uploaded_file.read().decode("utf-8", errors="ignore")
 
     return uploaded_file.read().decode("utf-8", errors="ignore")
+
+
+def get_target_documents(target_name: str, documents: list[str], document_names: list[str]):
+    """Return selected document(s) based on user choice."""
+    if target_name == "All uploaded papers":
+        return documents, document_names
+
+    selected_index = document_names.index(target_name)
+    return [documents[selected_index]], [document_names[selected_index]]
 
 
 uploaded_files = st.file_uploader(
@@ -93,22 +100,86 @@ tabs = st.tabs(
 )
 
 with tabs[0]:
-    st.subheader("Extractive summary")
-    summary = summarize_text(combined_text, max_sentences=max_summary_sentences)
-    st.markdown(summary)
+    st.subheader("Grounded summary")
+    st.caption(
+        "By default, summaries are generated separately for each uploaded paper."
+    )
+
+    summary_mode = st.radio(
+        "Summary mode",
+        ["Separate summaries", "Combined summary"],
+        horizontal=True,
+    )
+
+    if summary_mode == "Separate summaries":
+        for doc_name, doc_text in zip(document_names, documents):
+            with st.expander(doc_name, expanded=len(documents) <= 2):
+                summary = summarize_text(
+                    doc_text,
+                    max_sentences=max_summary_sentences,
+                )
+                st.markdown(summary)
+    else:
+        st.warning(
+            "Combined summary mixes all uploaded papers. Use this only when you want an overview of the full document set."
+        )
+        summary = summarize_text(
+            combined_text,
+            max_sentences=max_summary_sentences,
+        )
+        st.markdown(summary)
+
 
 with tabs[1]:
-    st.subheader("Top keywords and phrases")
-    keywords = extract_keywords(combined_text, top_n=max_keywords)
-    if not keywords.empty:
-        st.dataframe(keywords, use_container_width=True)
+    st.subheader("Keywords and phrases")
+    st.caption(
+        "Keywords are shown separately by paper. You can also view combined keywords."
+    )
+
+    keyword_mode = st.radio(
+        "Keyword mode",
+        ["By paper", "Combined keywords"],
+        horizontal=True,
+    )
+
+    if keyword_mode == "By paper":
+        for doc_name, doc_text in zip(document_names, documents):
+            with st.expander(doc_name, expanded=len(documents) <= 2):
+                keywords = extract_keywords(doc_text, top_n=max_keywords)
+
+                if not keywords.empty:
+                    st.dataframe(
+                        keywords,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.warning("No keywords found for this document.")
     else:
-        st.warning("No keywords found. Try a longer document.")
+        keywords = extract_keywords(combined_text, top_n=max_keywords)
+
+        if not keywords.empty:
+            st.dataframe(
+                keywords,
+                use_container_width=True,
+                hide_index=True,
+            )
+        else:
+            st.warning("No keywords found. Try a longer document.")
+
 
 with tabs[2]:
     st.subheader("Ask the paper")
     st.caption(
-        "Ask a question in English or Chinese. The answer is generated from retrieved paper evidence."
+        "Ask a question in English or Chinese. You can target one paper or all uploaded papers."
+    )
+
+    target_options = ["All uploaded papers"] + document_names
+
+    target_name = st.selectbox(
+        "Question target",
+        target_options,
+        index=0,
     )
 
     example_questions = [
@@ -116,10 +187,12 @@ with tabs[2]:
         "What methods or characterization techniques are used?",
         "What are the main results?",
         "What limitations or future work are mentioned?",
+        "What parameters or settings are used?",
         "这篇文章研究了什么材料体系？",
         "这篇文章用了什么方法或表征手段？",
         "这篇文章的主要结果是什么？",
         "这篇文章有什么局限或未来工作？",
+        "这篇文章用了哪些参数或设定？",
     ]
 
     selected_example = st.selectbox(
@@ -141,10 +214,16 @@ with tabs[2]:
         if not query.strip():
             st.warning("Please enter a question.")
         else:
+            target_documents, target_document_names = get_target_documents(
+                target_name,
+                documents,
+                document_names,
+            )
+
             qa_result = answer_question(
-                documents=documents,
+                documents=target_documents,
                 query=query,
-                document_names=document_names,
+                document_names=target_document_names,
                 top_k=top_k,
                 max_answer_sentences=4,
             )
@@ -157,12 +236,13 @@ with tabs[2]:
                 with st.expander("Show retrieved evidence passages", expanded=False):
                     for i, item in enumerate(evidence, start=1):
                         source_index = item["document_index"]
-                        source_name = document_names[source_index]
+                        source_name = target_document_names[source_index]
                         st.markdown(f"#### Evidence passage {i}")
                         st.caption(
                             f"Source: {source_name} | similarity: {item['score']:.3f}"
                         )
                         st.write(item["passage"])
+
 
 with tabs[3]:
     st.subheader("Compare papers")
@@ -224,19 +304,30 @@ with tabs[3]:
 
         st.info(comparison["note"])
 
+
 with tabs[4]:
     st.subheader("Materials-science domain hints")
-    hints = find_domain_hints(combined_text)
-    for category, snippets in hints.items():
-        with st.expander(category.replace("_", " ").title(), expanded=True):
-            if snippets:
-                for snippet in snippets:
-                    st.write("- " + snippet)
-            else:
-                st.caption("No obvious hint detected.")
+    st.caption(
+        "Domain hints are shown separately for each uploaded paper."
+    )
+
+    for doc_name, doc_text in zip(document_names, documents):
+        with st.expander(doc_name, expanded=len(documents) == 1):
+            hints = find_domain_hints(doc_text)
+
+            for category, snippets in hints.items():
+                st.markdown(f"### {category.replace('_', ' ').title()}")
+
+                if snippets:
+                    for snippet in snippets:
+                        st.markdown(f"- {snippet}")
+                else:
+                    st.caption("No obvious hint detected.")
+
 
 with tabs[5]:
     st.subheader("Document preview")
+
     for name, doc in zip(document_names, documents):
         with st.expander(name, expanded=False):
             st.write(doc[:5000] + ("..." if len(doc) > 5000 else ""))
