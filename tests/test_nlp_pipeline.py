@@ -1,5 +1,6 @@
 from src.nlp_pipeline import (
     answer_question,
+    compare_documents,
     extract_keywords,
     retrieve_passages,
     summarize_text,
@@ -51,3 +52,31 @@ def test_answer_question_returns_grounded_answer():
     assert "answer" in result
     assert "evidence" in result
     assert "Grounded answer" in result["answer"]
+
+def test_compare_documents_returns_table():
+    doc_a = """
+    This work studies a van der Waals ferroelectric thin film.
+    The sample is prepared by exfoliation and dry transfer.
+    Raman spectroscopy and atomic force microscopy are used for characterization.
+    The device shows polarization-dependent second-harmonic generation.
+    However, the performance is limited by transfer contamination.
+    """
+
+    doc_b = """
+    This paper investigates a semiconductor oxide thin film device.
+    The film is fabricated by sputtering and post-annealing.
+    X-ray diffraction and scanning electron microscopy are used for characterization.
+    The results show improved stability after annealing.
+    Future work should optimize the processing temperature and film thickness.
+    """
+
+    result = compare_documents(
+        [doc_a, doc_b],
+        document_names=["paper_a", "paper_b"],
+        max_snippets_per_dimension=2,
+    )
+
+    assert "table" in result
+    assert "details" in result
+    assert not result["table"].empty
+    assert "Dimension" in result["table"].columns
