@@ -5,6 +5,7 @@ import streamlit as st
 from src.pdf_utils import extract_text_from_pdf
 from src.nlp_pipeline import (
     answer_question,
+    compare_documents,
     extract_keywords,
     extract_sections,
     retrieve_passages,
