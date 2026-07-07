@@ -2,22 +2,36 @@ import re
 from typing import List
 
 
+MOJIBAKE_CHARS = "�□■▲▶◀◆◇●○¤¼½¾ðþÿ�"
+
+
 def clean_text(text: str) -> str:
     """Normalize PDF-extracted text and remove common scientific-PDF artifacts."""
     if not text:
         return ""
 
     text = text.replace("\r", "\n")
+
+    # Remove PDF broken hyphenation.
     text = re.sub(r"-\n", "", text)
+
+    # Remove common PDF extraction artifacts.
+    text = re.sub(r"\(cid:\d+\)", " ", text)
+    text = re.sub(r"[{}]+".format(re.escape(MOJIBAKE_CHARS)), " ", text)
+
+    # Normalize common mojibake fragments seen in formula-heavy PDFs.
+    text = text.replace("¼", " ")
+    text = text.replace("ð", " ")
+    text = text.replace("¤", " ")
+    text = text.replace("ÿ", " ")
+    text = text.replace("þ", " ")
+
+    # Remove isolated replacement boxes.
+    text = text.replace("�", " ")
+
+    # Normalize whitespace.
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
-
-    # Remove repeated replacement characters and common broken glyphs.
-    text = text.replace("�", "")
-    text = text.replace("■", "")
-    text = text.replace("□", "")
-    text = text.replace("▲", "")
-    text = text.replace("�", "")
 
     # Normalize strange spacing around punctuation.
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
@@ -32,12 +46,16 @@ def is_noisy_sentence(sentence: str) -> bool:
     if not sentence:
         return True
 
+    sentence = sentence.strip()
     words = sentence.split()
+    lower_sentence = sentence.lower()
 
     if len(words) < 7:
         return True
 
-    # Skip author / affiliation / arXiv metadata lines.
+    if len(words) > 90:
+        return True
+
     metadata_patterns = [
         "arxiv:",
         "dated:",
@@ -47,38 +65,66 @@ def is_noisy_sentence(sentence: str) -> bool:
         "copyright",
         "all rights reserved",
         "corresponding author",
+        "journal of",
+        "published by",
+        "downloaded from",
+        "accepted manuscript",
+        "preprint",
     ]
 
-    lower_sentence = sentence.lower()
     if any(pattern in lower_sentence for pattern in metadata_patterns):
         return True
 
-    # Skip formula-heavy sentences.
+    noisy_markers = [
+        "fig.",
+        "figs.",
+        "figure",
+        "eq.",
+        "equation",
+        "appendix",
+        "supplementary",
+        "table",
+    ]
+
+    # One mention of figure can be acceptable, but many formula/figure references are usually bad.
+    if sum(marker in lower_sentence for marker in noisy_markers) >= 2:
+        return True
+
+    weird_char_count = sum(sentence.count(ch) for ch in MOJIBAKE_CHARS)
+    if weird_char_count > 1:
+        return True
+
     math_symbols = sum(
         sentence.count(symbol)
         for symbol in [
             "≈", "σ", "∆", "Δ", "⊥", "∥", "∞", "∂", "∑", "∫",
-            "α", "β", "γ", "θ", "λ", "μ", "π", "ω", "χ",
-            "=", "+", "-", "/", "\\", "<", ">", "|",
+            "α", "β", "γ", "θ", "λ", "μ", "π", "ω", "χ", "η",
+            "=", "+", "/", "\\", "<", ">", "|", "±", "√", "∇",
         ]
     )
 
-    if math_symbols > 8:
+    if math_symbols > 6:
         return True
 
-    # Skip lines with too many numbers, equation references, or broken tokens.
+    # Too many numbers usually means equation, table, page header, or reference noise.
     number_like = len(re.findall(r"\b\d+(\.\d+)?\b", sentence))
     if number_like > 8:
         return True
 
-    # Skip sentences with too many single-character tokens.
+    # Too many single-character tokens usually means broken formula text.
     single_char_tokens = sum(1 for word in words if len(word) == 1)
-    if single_char_tokens / max(len(words), 1) > 0.25:
+    if single_char_tokens / max(len(words), 1) > 0.22:
         return True
 
-    # Skip sentences where alphabetic content is too low.
     alphabetic_chars = sum(ch.isalpha() for ch in sentence)
-    if alphabetic_chars / max(len(sentence), 1) < 0.45:
+    if alphabetic_chars / max(len(sentence), 1) < 0.48:
+        return True
+
+    # Filter obvious page/footer lines.
+    if re.search(r"^\d+\s*$", sentence):
+        return True
+
+    if re.search(r"^\d{5,}-\d+", sentence):
         return True
 
     return False
@@ -90,10 +136,18 @@ def split_sentences(text: str) -> List[str]:
     if not text:
         return []
 
-    candidates = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", text)
+    # Split both paragraph lines and normal sentence boundaries.
+    raw_candidates = []
+    for paragraph in text.split("\n"):
+        paragraph = paragraph.strip()
+        if not paragraph:
+            continue
+
+        parts = re.split(r"(?<=[.!?])\s+(?=[A-Z0-9])", paragraph)
+        raw_candidates.extend(parts)
 
     sentences = []
-    for sentence in candidates:
+    for sentence in raw_candidates:
         sentence = sentence.strip()
         sentence = re.sub(r"\s+", " ", sentence)
 
@@ -110,7 +164,6 @@ def split_passages(text: str, max_words: int = 120) -> List[str]:
     passages = []
 
     for paragraph in paragraphs:
-        # Remove extremely noisy paragraphs before retrieval.
         clean_sentences = [
             sentence for sentence in split_sentences(paragraph)
             if not is_noisy_sentence(sentence)
