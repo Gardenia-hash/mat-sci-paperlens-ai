@@ -81,7 +81,16 @@ if not documents:
 
 combined_text = "\n\n".join(documents)
 
-tabs = st.tabs(["Summary", "Keywords", "Ask / Search", "Domain Hints", "Text Preview"])
+tabs = st.tabs(
+    [
+        "Summary",
+        "Keywords",
+        "Ask / Search",
+        "Compare Papers",
+        "Domain Hints",
+        "Text Preview",
+    ]
+)
 
 with tabs[0]:
     st.subheader("Extractive summary")
