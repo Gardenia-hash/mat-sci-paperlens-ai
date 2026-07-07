@@ -1052,6 +1052,306 @@ def answer_question(
         "confidence": confidence,
     }
 
+COMPARISON_DIMENSIONS = {
+    "Research focus": [
+        "we study",
+        "we investigate",
+        "we report",
+        "we present",
+        "we propose",
+        "this work",
+        "this paper",
+        "aim",
+        "focus",
+        "objective",
+        "goal",
+    ],
+    "Material / system": DOMAIN_KEYWORDS["materials_system"]
+    + [
+        "sample",
+        "compound",
+        "material system",
+        "device structure",
+        "layered",
+        "hybrid structure",
+    ],
+    "Fabrication / synthesis": DOMAIN_KEYWORDS["fabrication_or_synthesis"]
+    + [
+        "prepared",
+        "fabricated",
+        "transferred",
+        "grown",
+        "processed",
+        "patterned",
+    ],
+    "Characterization / measurement": DOMAIN_KEYWORDS["characterization"]
+    + [
+        "measurement",
+        "measured",
+        "characterized",
+        "spectroscopy",
+        "diffraction",
+        "imaging",
+        "electrical measurement",
+        "optical measurement",
+    ],
+    "Parameters / settings": [
+        "temperature",
+        "current",
+        "voltage",
+        "field",
+        "magnetic field",
+        "electric field",
+        "thickness",
+        "width",
+        "length",
+        "diameter",
+        "size",
+        "dimension",
+        "frequency",
+        "power",
+        "pressure",
+        "time",
+        "rate",
+        "dose",
+        "concentration",
+        "parameter",
+        "setting",
+        "condition",
+    ],
+    "Key results / performance": DOMAIN_KEYWORDS["results_or_performance"]
+    + [
+        "show",
+        "shows",
+        "demonstrate",
+        "demonstrates",
+        "observed",
+        "revealed",
+        "achieved",
+        "performance",
+        "response",
+        "signal",
+        "effect",
+    ],
+    "Limitations / future work": DOMAIN_KEYWORDS["limitations_or_future_work"]
+    + [
+        "drawback",
+        "weakness",
+        "future direction",
+        "further study",
+        "needs",
+        "need to",
+        "still",
+        "remain",
+    ],
+}
+
+
+PARAMETER_UNIT_PATTERN = re.compile(
+    r"\b\d+(\.\d+)?\s?"
+    r"(nm|μm|um|mm|cm|m|k|K|°C|c|T|mT|Oe|A|mA|uA|μA|V|mV|eV|meV|"
+    r"Hz|kHz|MHz|GHz|s|ms|ns|min|h|Pa|bar|rpm|%|wt%|at%)\b"
+)
+
+
+def _sentence_dimension_score(sentence: str, dimension: str, keywords: List[str]) -> float:
+    """Score how relevant a sentence is to a comparison dimension."""
+    lower_sentence = sentence.lower()
+    score = 0.0
+
+    for keyword in keywords:
+        if keyword.lower() in lower_sentence:
+            score += 1.0
+
+    if dimension == "Parameters / settings":
+        unit_hits = PARAMETER_UNIT_PATTERN.findall(sentence)
+        score += 1.5 * len(unit_hits)
+
+        # Extra reward for sentences that look like experimental/simulation conditions.
+        condition_terms = [
+            "under",
+            "at",
+            "with",
+            "using",
+            "condition",
+            "parameter",
+            "set to",
+            "fixed",
+            "varied",
+        ]
+        if any(term in lower_sentence for term in condition_terms):
+            score += 0.8
+
+    if dimension == "Research focus":
+        if len(sentence.split()) <= 35:
+            score += 0.3
+
+    if dimension == "Key results / performance":
+        result_terms = [
+            "show",
+            "shows",
+            "demonstrate",
+            "demonstrates",
+            "indicate",
+            "suggest",
+            "therefore",
+            "as a result",
+        ]
+        if any(term in lower_sentence for term in result_terms):
+            score += 0.8
+
+    return score
+
+
+def _extract_dimension_snippets(
+    text: str,
+    dimension: str,
+    keywords: List[str],
+    max_snippets: int = 3,
+) -> List[str]:
+    """Extract the most relevant evidence sentences for one comparison dimension."""
+    sentences = split_sentences(text)
+    scored = []
+
+    for sentence in sentences:
+        sentence = _clean_sentence_for_summary(sentence)
+
+        if _is_bad_summary_sentence(sentence):
+            continue
+
+        score = _sentence_dimension_score(sentence, dimension, keywords)
+
+        if score > 0:
+            scored.append(
+                {
+                    "sentence": sentence,
+                    "score": score,
+                }
+            )
+
+    scored = sorted(scored, key=lambda item: item["score"], reverse=True)
+
+    selected = []
+    seen = set()
+
+    for item in scored:
+        sentence = item["sentence"]
+        normalized = re.sub(r"[^a-zA-Z0-9]+", " ", sentence.lower()).strip()
+
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        selected.append(sentence)
+
+        if len(selected) >= max_snippets:
+            break
+
+    return selected
+
+
+def _format_comparison_cell(snippets: List[str]) -> str:
+    """Format snippets for display in a comparison table."""
+    if not snippets:
+        return "Not clearly detected."
+
+    return "\n".join(f"- {snippet}" for snippet in snippets)
+
+
+def _extract_top_keyword_set(text: str, top_n: int = 15) -> set:
+    """Extract a set of top keywords from one document."""
+    keyword_df = extract_keywords(text, top_n=top_n)
+
+    if keyword_df.empty:
+        return set()
+
+    return set(keyword_df["keyword"].astype(str).str.lower().tolist())
+
+
+def compare_documents(
+    documents: List[str],
+    document_names: List[str],
+    max_snippets_per_dimension: int = 3,
+    top_keywords: int = 15,
+) -> Dict[str, object]:
+    """Compare two or more papers across research-relevant dimensions.
+
+    The comparison is extractive and grounded in the uploaded documents.
+    """
+    if len(documents) < 2:
+        return {
+            "table": pd.DataFrame(),
+            "details": {},
+            "keyword_table": pd.DataFrame(),
+            "note": "Please upload at least two documents for comparison.",
+        }
+
+    safe_names = [
+        name if name else f"Document {index + 1}"
+        for index, name in enumerate(document_names)
+    ]
+
+    comparison_rows = []
+    details: Dict[str, Dict[str, List[str]]] = {}
+
+    for dimension, keywords in COMPARISON_DIMENSIONS.items():
+        row = {"Dimension": dimension}
+        details[dimension] = {}
+
+        for doc_index, document in enumerate(documents):
+            doc_name = safe_names[doc_index]
+            snippets = _extract_dimension_snippets(
+                text=document,
+                dimension=dimension,
+                keywords=keywords,
+                max_snippets=max_snippets_per_dimension,
+            )
+
+            details[dimension][doc_name] = snippets
+            row[doc_name] = _format_comparison_cell(snippets)
+
+        comparison_rows.append(row)
+
+    comparison_table = pd.DataFrame(comparison_rows)
+
+    keyword_sets = []
+    for doc in documents:
+        keyword_sets.append(_extract_top_keyword_set(doc, top_n=top_keywords))
+
+    common_keywords = set.intersection(*keyword_sets) if keyword_sets else set()
+
+    keyword_rows = []
+
+    for doc_index, keyword_set in enumerate(keyword_sets):
+        doc_name = safe_names[doc_index]
+        unique_keywords = keyword_set - set.union(
+            *[
+                other_set
+                for other_index, other_set in enumerate(keyword_sets)
+                if other_index != doc_index
+            ]
+        )
+
+        keyword_rows.append(
+            {
+                "Document": doc_name,
+                "Shared keywords": ", ".join(sorted(common_keywords)) or "None detected",
+                "Distinctive keywords": ", ".join(sorted(unique_keywords)) or "None detected",
+            }
+        )
+
+    keyword_table = pd.DataFrame(keyword_rows)
+
+    return {
+        "table": comparison_table,
+        "details": details,
+        "keyword_table": keyword_table,
+        "note": (
+            "This comparison is extractive and evidence-based. "
+            "Each cell is built from sentences detected in the uploaded documents."
+        ),
+    }
+
 def find_domain_hints(text: str, max_snippets_per_category: int = 4) -> Dict[str, List[str]]:
     """Find short snippets related to common materials-science paper sections."""
     sentences = split_sentences(text)
