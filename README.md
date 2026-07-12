@@ -1,103 +1,80 @@
 # MatSci PaperLens AI
 
-A lightweight AI/NLP assistant for materials-science and semiconductor papers.
+A local-first, evidence-grounded reading assistant for materials-science and semiconductor papers.
 
-This project lets you upload PDF or text papers, then produces:
+MatSci PaperLens AI analyzes uploaded PDF, TXT, and Markdown papers without requiring an API key. It keeps papers separate by default, preserves source names in grounded answers, and makes uncertainty visible instead of inventing unsupported claims.
 
-- extractive paper summaries
-- TF-IDF keyword and phrase extraction
-- question-style passage retrieval
-- quick section hints for materials, fabrication, characterization, results, and limitations
-- a simple Streamlit web interface
+The interface supports English and Chinese. Chinese mode localizes the UI and analysis labels; it does **not** translate or alter the original evidence text from a paper.
 
-The project is designed as a first GitHub portfolio project for a materials-science / semiconductor profile: it is small enough to finish, but complete enough to show Python, machine learning, PDF processing, and domain awareness.
+## Current features
 
----
+- Streamlit web interface with English / Chinese UI
+- PDF, TXT, and Markdown upload
+- PyMuPDF text extraction and scientific-PDF noise cleanup
+- Section-aware extractive summaries
+- Per-paper or explicitly combined keyword extraction
+- English or Chinese grounded questions against one selected paper or all papers
+- Confidence labels, retrieved evidence passages, and source document names
+- Multi-paper comparison across focus, material, fabrication, characterization, parameters, results, and limitations
+- Per-paper materials-science domain hints
+- Local raster-figure extraction with source page, dimensions, format, and nearby caption
+- A dedicated **Figures / 图像解读** tab with explicit paper selection
+- Text-grounded figure interpretation separated into **Direct evidence**, **Reasonable inference**, and **Unknown**
+- pytest coverage and GitHub Actions
 
-## Demo idea
+## Evidence and privacy principles
 
-Upload a PDF paper or paste text from a materials-science article, then ask questions such as:
-
-```text
-What material system is studied?
-What characterization methods are used?
-What is the main result?
-What are the limitations?
-```
-
-The app returns the most relevant passages and a compact summary.
-
----
-
-## Why this project is useful
-
-Researchers often collect many PDFs but lose time finding the key material system, method, measurement, and result. This project builds a simple local assistant that helps screen papers before deeper reading.
-
-It is not a replacement for expert reading. It is a fast first-pass literature helper.
-
----
-
-## Tech stack
-
-- Python
-- Streamlit for the web app
-- PyMuPDF for PDF text extraction
-- scikit-learn for TF-IDF features and cosine similarity
-- pytest for basic tests
-
-Optional future extension:
-
-- Sentence Transformers for semantic search
-- OpenAI / other LLM API for abstractive summaries
-- DOI metadata lookup
-- citation graph visualization
-
----
+- Papers are processed separately unless the user explicitly chooses a combined / all-papers mode.
+- Evidence from multiple papers is never presented as if it came from one paper.
+- The baseline works locally and does not require a paid model or API key.
+- Figure interpretation uses the caption and nearby page text only. It does not claim to read plotted values, colors, axes, or visual trends from pixels.
+- Automated output is a reading aid, not a replacement for checking the original paper.
 
 ## Quick start
 
-### 1. Clone the repo
+### Windows PowerShell
 
-```bash
-git clone https://github.com/ZHINIANJIN/mat-sci-paperlens-ai.git
+```powershell
+git clone https://github.com/Gardenia-hash/mat-sci-paperlens-ai.git
 cd mat-sci-paperlens-ai
-```
-
-### 2. Create a virtual environment
-
-Windows PowerShell:
-
-```bash
 python -m venv .venv
-.venv\Scripts\activate
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+python -m pytest -q
+python -m streamlit run app.py
 ```
 
-macOS / Linux:
+If PowerShell blocks activation, you can run the virtual-environment interpreter directly:
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pytest -q
+.\.venv\Scripts\python.exe -m streamlit run app.py
+```
+
+### macOS / Linux
 
 ```bash
+git clone https://github.com/Gardenia-hash/mat-sci-paperlens-ai.git
+cd mat-sci-paperlens-ai
 python -m venv .venv
 source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m pytest -q
+python -m streamlit run app.py
 ```
 
-### 3. Install dependencies
+Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
-```bash
-pip install -r requirements.txt
-```
+## Using the Figures tab
 
-### 4. Run the app
+1. Upload one or more PDF papers.
+2. Open **Figures / 图像解读**.
+3. When multiple papers are loaded, select the source paper first.
+4. Select an extracted figure and inspect its source page and original caption.
+5. Read the system interpretation by evidence level.
 
-```bash
-streamlit run app.py
-```
-
-### 5. Run tests
-
-```bash
-pytest
-```
-
----
+The current extractor targets embedded raster images. Vector-only figures, scanned full-page PDFs, images below the noise threshold, and captions with unusual layouts may not be detected. In those cases the app shows an explicit empty-state message.
 
 ## Project structure
 
@@ -106,88 +83,52 @@ mat-sci-paperlens-ai/
 ├── app.py
 ├── requirements.txt
 ├── README.md
-├── LICENSE
 ├── src/
-│   ├── __init__.py
+│   ├── figure_utils.py
+│   ├── models.py
+│   ├── nlp_pipeline.py
 │   ├── pdf_utils.py
-│   ├── text_utils.py
-│   └── nlp_pipeline.py
+│   └── text_utils.py
 ├── data/
 │   └── sample_materials_text.txt
 ├── tests/
+│   ├── test_figure_utils.py
 │   └── test_nlp_pipeline.py
-├── docs/
-│   ├── github_upload_guide.md
-│   └── project_creation_plan.md
-└── .github/
-    └── workflows/
-        └── python-tests.yml
+└── .github/workflows/python-tests.yml
 ```
 
----
+## How it works
 
-## Current features
-
-### 1. PDF and text ingestion
-
-The app can read uploaded PDF files through PyMuPDF, or text files through normal UTF-8 decoding.
-
-### 2. Extractive summary
-
-The summary is generated by splitting the paper into sentences, transforming each sentence into TF-IDF features, and selecting high-scoring sentences.
-
-### 3. Keyword extraction
-
-The app extracts top unigrams and bigrams from the paper.
-
-### 4. Passage retrieval
-
-The app compares a user question with paper passages using cosine similarity. It returns the top matching passages.
-
-### 5. Materials-science section hints
-
-The app uses domain keyword rules to highlight possible mentions of:
-
-- materials system
-- fabrication / synthesis
-- characterization
-- results / performance
-- limitations / future work
-
----
-
-## Example questions
-
-```text
-What material system is studied?
-Which experimental methods are used?
-What is the main performance metric?
-What are the possible device applications?
-What limitations did the paper mention?
-```
-
----
+- **Summaries:** section-aware TF-IDF ranking with sentence cleanup and redundancy control
+- **Keywords:** unigram / bigram TF-IDF features
+- **Grounded QA:** passage retrieval plus extractive sentence selection and confidence scoring
+- **Comparison:** evidence snippets collected independently from each paper
+- **Figures:** PyMuPDF embedded-image extraction, page-aware metadata, spatially nearest caption association, and text-only interpretation
 
 ## Roadmap
 
-- [ ] Add support for multiple-paper comparison
-- [ ] Add DOI / title / author metadata extraction
-- [ ] Add optional Sentence Transformers semantic search
-- [ ] Add paper-to-table extraction for material, method, result, limitation
-- [ ] Add export to Markdown / CSV
-- [ ] Add example screenshots to README
-- [ ] Deploy demo on Streamlit Community Cloud
+- [x] Multi-paper comparison and explicit all-papers modes
+- [x] English / Chinese interface
+- [x] Raster figure, page, and caption extraction
+- [x] Grounded text-only figure interpretation
+- [ ] Page-aware evidence citations for Summary / QA / Compare
+- [ ] Better multi-column and wrapped-caption association
+- [ ] OCR support for scanned PDFs
+- [ ] Optional visual-model provider behind an explicit configuration switch
+- [ ] Optional Sentence Transformers with TF-IDF fallback
+- [ ] DOI / title / author metadata extraction
+- [ ] Markdown / CSV report export
+- [ ] UI smoke tests and example screenshots
 
----
+## Development checks
 
-## Portfolio positioning
+```powershell
+python -m pytest -q
+python -m streamlit run app.py
+```
 
-This project can be described on a CV or LinkedIn as:
-
-> Built a Python-based AI/NLP literature assistant for materials-science papers, integrating PDF text extraction, TF-IDF summarization, keyword extraction, and query-based passage retrieval in a Streamlit interface.
-
----
+New logic should include tests. Do not commit uploaded PDFs, virtual environments, caches, secrets, or API keys.
 
 ## Disclaimer
 
-This tool performs automated text analysis. Always verify the original paper before using any extracted result in academic work.
+This tool performs automated text and PDF analysis. Always verify extracted evidence and interpretations against the original paper before academic or engineering use.
