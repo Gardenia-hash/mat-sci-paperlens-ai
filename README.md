@@ -50,6 +50,7 @@ cd mat-sci-paperlens-ai
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m streamlit run app.py
 ```
@@ -58,6 +59,7 @@ If PowerShell blocks activation, you can run the virtual-environment interpreter
 
 ```powershell
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 .\.venv\Scripts\python.exe -m pytest -q
 .\.venv\Scripts\python.exe -m streamlit run app.py
 ```
@@ -70,6 +72,7 @@ cd mat-sci-paperlens-ai
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+python -m pip install -r requirements-dev.txt
 python -m pytest -q
 python -m streamlit run app.py
 ```
@@ -77,6 +80,12 @@ python -m streamlit run app.py
 Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
 The built-in materials-science example is enabled on first launch, so the interface can be explored before uploading a paper. Uploading a real file automatically switches the demo off.
+
+## Public demo deployment
+
+The repository is ready for Streamlit Community Cloud with pinned production dependencies, bounded caches, upload guardrails, a project theme, and a CI health check. See [DEPLOYMENT.md](DEPLOYMENT.md) for the exact repository, branch, entrypoint, Python version, and one-time browser authorization steps.
+
+Once the public URL is created, add Streamlit's official app badge here and set the same URL as the GitHub repository homepage.
 
 ## Using the Figures tab
 
@@ -93,8 +102,12 @@ The current extractor targets embedded raster images. Vector-only figures, scann
 ```text
 mat-sci-paperlens-ai/
 ├── app.py
+├── DEPLOYMENT.md
 ├── requirements.txt
+├── requirements-dev.txt
 ├── README.md
+├── .streamlit/
+│   └── config.toml
 ├── src/
 │   ├── figure_utils.py
 │   ├── document_utils.py
@@ -108,6 +121,8 @@ mat-sci-paperlens-ai/
 ├── tests/
 │   ├── test_figure_utils.py
 │   └── test_nlp_pipeline.py
+├── scripts/
+│   └── smoke_streamlit.py
 └── .github/workflows/python-tests.yml
 ```
 
@@ -127,6 +142,7 @@ mat-sci-paperlens-ai/
 - [x] Grounded text-only figure interpretation
 - [x] Complete-sentence reconstruction and integrated extractive output
 - [x] First-run onboarding, processing feedback, caching, and Markdown report export
+- [x] Streamlit Community Cloud configuration and deployment health check
 - [ ] Page-aware evidence citations for Summary / QA / Compare
 - [ ] Better multi-column and wrapped-caption association
 - [ ] OCR support for scanned PDFs
