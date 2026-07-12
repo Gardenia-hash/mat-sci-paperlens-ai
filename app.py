@@ -1,8 +1,10 @@
+from io import BytesIO
 from pathlib import Path
 
 import streamlit as st
 
 from src.pdf_utils import extract_text_from_pdf
+from src.figure_utils import explain_figure, extract_figures_from_pdf
 from src.nlp_pipeline import (
     answer_question,
     compare_documents,
@@ -45,6 +47,7 @@ UI_TEXT = {
         "ask_tab": "Ask / Search",
         "compare_tab": "Compare Papers",
         "domain_tab": "Domain Hints",
+        "figures_tab": "Figures",
         "preview_tab": "Text Preview",
         "summary_header": "Grounded summary",
         "summary_caption": "Summaries are generated separately for each uploaded paper by default.",
@@ -81,6 +84,21 @@ UI_TEXT = {
         "domain_header": "Materials-science domain hints",
         "domain_caption": "Domain hints are shown separately for each uploaded paper.",
         "no_hint": "No obvious hint detected.",
+        "figures_header": "Figures and grounded interpretation",
+        "figures_caption": "Raster figures are extracted locally. The baseline explanation uses only captions and nearby text; it does not guess from pixels.",
+        "figure_document": "Paper containing the figure",
+        "figure_select": "Select a figure",
+        "figure_source": "Figure source",
+        "figure_page": "Page",
+        "figure_size": "Extracted size",
+        "original_caption": "Original caption",
+        "missing_caption": "No caption was detected near this image.",
+        "system_explanation": "System interpretation",
+        "direct_evidence": "Direct evidence",
+        "reasonable_inference": "Reasonable inference",
+        "unknown": "Unknown",
+        "no_figures": "No meaningful raster figures were extracted. The PDF may be scanned, vector-only, or contain only small decorative images.",
+        "no_figures_document": "No meaningful raster figures were extracted from this paper.",
         "preview_header": "Document preview",
         "words": "words",
         "file_count": "file(s)",
@@ -109,6 +127,7 @@ UI_TEXT = {
         "ask_tab": "问答 / 检索",
         "compare_tab": "论文对比",
         "domain_tab": "领域提示",
+        "figures_tab": "图像解读",
         "preview_tab": "文本预览",
         "summary_header": "证据式摘要",
         "summary_caption": "默认情况下，每篇上传论文会被单独总结，避免多篇内容混在一起。",
@@ -145,6 +164,21 @@ UI_TEXT = {
         "domain_header": "材料科学领域提示",
         "domain_caption": "领域提示会按每篇论文分别展示。",
         "no_hint": "没有检测到明显提示。",
+        "figures_header": "论文图像与证据式解读",
+        "figures_caption": "图像在本地提取。基础解释只使用原文 caption 和同页邻近文字，不根据像素猜测结论。",
+        "figure_document": "选择图像所属论文",
+        "figure_select": "选择图像",
+        "figure_source": "图像来源",
+        "figure_page": "页码",
+        "figure_size": "提取尺寸",
+        "original_caption": "原文 caption",
+        "missing_caption": "该图附近未检测到 caption。",
+        "system_explanation": "系统解释",
+        "direct_evidence": "直接证据",
+        "reasonable_inference": "合理推断",
+        "unknown": "无法确认",
+        "no_figures": "没有提取到有效的栅格图像。PDF 可能是扫描件、只含矢量图，或只含很小的装饰图片。",
+        "no_figures_document": "这篇论文没有提取到有效的栅格图像。",
         "preview_header": "文本预览",
         "words": "词",
         "file_count": "个文件",
@@ -244,7 +278,7 @@ def read_uploaded_file(uploaded_file) -> str:
     name = uploaded_file.name.lower()
 
     if name.endswith(".pdf"):
-        return extract_text_from_pdf(uploaded_file)
+        return extract_text_from_pdf(BytesIO(uploaded_file.getvalue()))
 
     if name.endswith(".txt") or name.endswith(".md"):
         return uploaded_file.read().decode("utf-8", errors="ignore")
@@ -357,14 +391,23 @@ use_sample = st.checkbox(t("sample_checkbox"), value=not uploaded_files)
 
 documents = []
 document_names = []
+figures_by_document = {}
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
         raw_text = read_uploaded_file(uploaded_file)
         text = clean_text(raw_text)
-        if text:
+        figures = []
+        if uploaded_file.name.lower().endswith(".pdf"):
+            figures = extract_figures_from_pdf(
+                uploaded_file.getvalue(),
+                document_name=uploaded_file.name,
+            )
+
+        if text or figures:
             documents.append(text)
             document_names.append(uploaded_file.name)
+            figures_by_document[uploaded_file.name] = figures
 
 if use_sample:
     sample_path = Path("data/sample_materials_text.txt")
@@ -372,6 +415,7 @@ if use_sample:
         sample_text = clean_text(sample_path.read_text(encoding="utf-8"))
         documents.append(sample_text)
         document_names.append("sample_materials_text.txt")
+        figures_by_document["sample_materials_text.txt"] = []
 
 if not documents:
     st.info(t("no_docs"))
@@ -400,6 +444,7 @@ tabs = st.tabs(
         t("ask_tab"),
         t("compare_tab"),
         t("domain_tab"),
+        t("figures_tab"),
         t("preview_tab"),
     ]
 )
@@ -627,6 +672,70 @@ with tabs[4]:
 
 
 with tabs[5]:
+    st.subheader(t("figures_header"))
+    st.caption(t("figures_caption"))
+
+    total_figures = sum(len(items) for items in figures_by_document.values())
+    if total_figures == 0:
+        st.info(t("no_figures"))
+    else:
+        figure_document = st.selectbox(
+            t("figure_document"),
+            document_names,
+            key="figure_document",
+        )
+        available_figures = figures_by_document.get(figure_document, [])
+
+        if not available_figures:
+            st.info(t("no_figures_document"))
+        else:
+            figure_labels = [
+                f"Figure {figure.image_index} · {t('figure_page')} {figure.page_number}"
+                for figure in available_figures
+            ]
+            selected_label = st.selectbox(
+                t("figure_select"),
+                figure_labels,
+                key="figure_selector",
+            )
+            figure = available_figures[figure_labels.index(selected_label)]
+
+            st.image(
+                figure.image_bytes,
+                caption=f"{t('figure_source')}: {figure.document_name} · {t('figure_page')} {figure.page_number}",
+                use_container_width=True,
+            )
+
+            meta_1, meta_2, meta_3 = st.columns(3)
+            meta_1.metric(t("figure_page"), figure.page_number)
+            meta_2.metric(t("figure_size"), f"{figure.width} × {figure.height}")
+            meta_3.metric("Format", figure.extension.upper())
+
+            st.markdown(f"### {t('original_caption')}")
+            if figure.caption:
+                st.write(figure.caption)
+            else:
+                st.warning(t("missing_caption"))
+
+            st.markdown(f"### {t('system_explanation')}")
+            explanation = explain_figure(
+                figure,
+                language=st.session_state["language"],
+            )
+            for heading, items in (
+                (t("direct_evidence"), explanation.direct_evidence),
+                (t("reasonable_inference"), explanation.reasonable_inference),
+                (t("unknown"), explanation.unknown),
+            ):
+                st.markdown(f"#### {heading}")
+                if items:
+                    for item in items:
+                        st.markdown(f"- {item}")
+                else:
+                    st.caption(t("not_detected"))
+
+
+with tabs[6]:
     st.subheader(t("preview_header"))
 
     for name, doc in zip(document_names, documents):
