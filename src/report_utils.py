@@ -1,0 +1,54 @@
+from __future__ import annotations
+
+from typing import Sequence
+
+from src.nlp_pipeline import extract_keywords, find_domain_hints, summarize_text
+
+
+def build_markdown_report(
+    documents: Sequence[str],
+    document_names: Sequence[str],
+    max_summary_sentences: int = 5,
+    top_keywords: int = 15,
+) -> str:
+    """Build a portable, source-separated Markdown report."""
+    if len(documents) != len(document_names):
+        raise ValueError("documents and document_names must have the same length")
+
+    lines = [
+        "# MatSci PaperLens AI report",
+        "",
+        "> Local, extractive analysis. Verify all evidence against the original papers.",
+        "",
+        f"Documents analyzed: {len(documents)}",
+    ]
+
+    for document, name in zip(documents, document_names):
+        lines.extend(["", "---", "", f"## {name}", ""])
+        lines.append(summarize_text(document, max_sentences=max_summary_sentences))
+
+        keyword_frame = extract_keywords(document, top_n=top_keywords)
+        lines.extend(["", "### Keywords", ""])
+        if keyword_frame.empty:
+            lines.append("No keywords were detected.")
+        else:
+            lines.append(
+                ", ".join(keyword_frame["keyword"].astype(str).tolist())
+            )
+
+        lines.extend(["", "### Domain evidence", ""])
+        hints = find_domain_hints(document)
+        detected_any = False
+        for category, snippets in hints.items():
+            if not snippets:
+                continue
+            detected_any = True
+            label = category.replace("_", " ").title()
+            lines.append(f"#### {label}")
+            lines.extend(f"- {snippet}" for snippet in snippets)
+            lines.append("")
+
+        if not detected_any:
+            lines.append("No domain-specific evidence was clearly detected.")
+
+    return "\n".join(lines).strip() + "\n"

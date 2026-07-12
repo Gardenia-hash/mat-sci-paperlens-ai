@@ -1,14 +1,21 @@
 # MatSci PaperLens AI
 
+[![Python tests](https://github.com/Gardenia-hash/mat-sci-paperlens-ai/actions/workflows/python-tests.yml/badge.svg)](https://github.com/Gardenia-hash/mat-sci-paperlens-ai/actions/workflows/python-tests.yml)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
+
 A local-first, evidence-grounded reading assistant for materials-science and semiconductor papers.
 
 MatSci PaperLens AI analyzes uploaded PDF, TXT, and Markdown papers without requiring an API key. It keeps papers separate by default, preserves source names in grounded answers, and makes uncertainty visible instead of inventing unsupported claims.
 
 The interface supports English and Chinese. Chinese mode localizes the UI and analysis labels; it does **not** translate or alter the original evidence text from a paper.
 
+![MatSci PaperLens AI overview](docs/screenshots/overview.png)
+
 ## Current features
 
 - Streamlit web interface with English / Chinese UI
+- Built-in interactive demo, three-step onboarding, progress feedback, and one-click workspace reset
 - PDF, TXT, and Markdown upload
 - PyMuPDF text extraction and scientific-PDF noise cleanup
 - PDF hard-wrap reconstruction, scientific-abbreviation protection, and incomplete-fragment filtering
@@ -21,6 +28,8 @@ The interface supports English and Chinese. Chinese mode localizes the UI and an
 - Local raster-figure extraction with source page, dimensions, format, and nearby caption
 - A dedicated **Figures / 图像解读** tab with explicit paper selection
 - Text-grounded figure interpretation separated into **Direct evidence**, **Reasonable inference**, and **Unknown**
+- Cached document analysis for smoother Streamlit interactions
+- Source-separated Markdown report export
 - pytest coverage and GitHub Actions
 
 ## Evidence and privacy principles
@@ -67,6 +76,8 @@ python -m streamlit run app.py
 
 Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
+The built-in materials-science example is enabled on first launch, so the interface can be explored before uploading a paper. Uploading a real file automatically switches the demo off.
+
 ## Using the Figures tab
 
 1. Upload one or more PDF papers.
@@ -86,9 +97,11 @@ mat-sci-paperlens-ai/
 ├── README.md
 ├── src/
 │   ├── figure_utils.py
+│   ├── document_utils.py
 │   ├── models.py
 │   ├── nlp_pipeline.py
 │   ├── pdf_utils.py
+│   ├── report_utils.py
 │   └── text_utils.py
 ├── data/
 │   └── sample_materials_text.txt
@@ -113,13 +126,14 @@ mat-sci-paperlens-ai/
 - [x] Raster figure, page, and caption extraction
 - [x] Grounded text-only figure interpretation
 - [x] Complete-sentence reconstruction and integrated extractive output
+- [x] First-run onboarding, processing feedback, caching, and Markdown report export
 - [ ] Page-aware evidence citations for Summary / QA / Compare
 - [ ] Better multi-column and wrapped-caption association
 - [ ] OCR support for scanned PDFs
 - [ ] Optional visual-model provider behind an explicit configuration switch
 - [ ] Optional Sentence Transformers with TF-IDF fallback
 - [ ] DOI / title / author metadata extraction
-- [ ] Markdown / CSV report export
+- [ ] CSV report export
 - [ ] UI smoke tests and example screenshots
 
 ## Development checks
@@ -134,3 +148,7 @@ New logic should include tests. Do not commit uploaded PDFs, virtual environment
 ## Disclaimer
 
 This tool performs automated text and PDF analysis. Always verify extracted evidence and interpretations against the original paper before academic or engineering use.
+
+## Support the project
+
+If MatSci PaperLens AI is useful to your research or learning, consider starring the repository. Stars help other materials-science researchers discover the project and give clear feedback that continued development is worthwhile.

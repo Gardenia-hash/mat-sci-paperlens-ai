@@ -1,10 +1,12 @@
 from io import BytesIO
+from html import escape
 from pathlib import Path
 
 import streamlit as st
 
 from src.pdf_utils import extract_text_from_pdf
 from src.figure_utils import explain_figure, extract_figures_from_pdf
+from src.document_utils import make_unique_document_name
 from src.nlp_pipeline import (
     answer_question,
     compare_documents,
@@ -12,6 +14,7 @@ from src.nlp_pipeline import (
     summarize_text,
     find_domain_hints,
 )
+from src.report_utils import build_markdown_report
 from src.text_utils import clean_text
 
 
@@ -27,10 +30,32 @@ UI_TEXT = {
         "app_title": "MatSci PaperLens AI",
         "app_subtitle": "A grounded AI/NLP assistant for materials-science and semiconductor papers.",
         "hero_badge": "Local · Evidence-based · Multi-paper",
-        "upload_label": "Upload one or more PDF/TXT papers",
-        "sample_checkbox": "Use sample materials-science text",
+        "benefit_private": "Private by default",
+        "benefit_private_detail": "No API key required",
+        "benefit_grounded": "Evidence first",
+        "benefit_grounded_detail": "Sources stay visible",
+        "benefit_compare": "Built for research",
+        "benefit_compare_detail": "Read and compare papers",
+        "step_upload": "1 · Add papers",
+        "step_upload_detail": "Upload PDF, TXT, or Markdown",
+        "step_explore": "2 · Explore evidence",
+        "step_explore_detail": "Summarize, ask, and compare",
+        "step_export": "3 · Keep your work",
+        "step_export_detail": "Download a Markdown report",
+        "upload_label": "Upload one or more PDF, TXT, or Markdown papers",
+        "sample_checkbox": "Try the built-in demo (no upload needed)",
         "settings": "Settings",
         "language": "Language",
+        "analysis_controls": "Analysis controls",
+        "reset_workspace": "Reset workspace",
+        "star_project": "Star this project on GitHub",
+        "star_note": "Finding it useful? A GitHub star helps other researchers discover it.",
+        "processing_documents": "Reading uploaded papers…",
+        "processing_file": "Reading",
+        "processing_complete": "Papers are ready",
+        "processing_partial": "Some files could not be read",
+        "file_errors": "Show file errors",
+        "workspace_ready": "Workspace ready · Papers: {documents} · Figures: {figures}. Choose a tool below.",
         "summary_sentences": "Summary sentences",
         "num_keywords": "Number of keywords",
         "retrieved_passages": "Retrieved passages",
@@ -38,6 +63,7 @@ UI_TEXT = {
         "sidebar_tip": "Tip: upload one or more papers. You can analyze each paper separately or compare them together.",
         "no_docs": "Upload a paper or enable the sample text to begin.",
         "documents": "Documents",
+        "figures_metric": "Figures",
         "total_words": "Approx. words",
         "mode": "Mode",
         "multi_doc": "Multi-paper",
@@ -48,6 +74,7 @@ UI_TEXT = {
         "compare_tab": "Compare Papers",
         "domain_tab": "Domain Hints",
         "figures_tab": "Figures",
+        "export_tab": "Export",
         "preview_tab": "Text Preview",
         "summary_header": "Grounded summary",
         "summary_caption": "Summaries are generated separately for each uploaded paper by default.",
@@ -99,6 +126,14 @@ UI_TEXT = {
         "unknown": "Unknown",
         "no_figures": "No meaningful raster figures were extracted. The PDF may be scanned, vector-only, or contain only small decorative images.",
         "no_figures_document": "No meaningful raster figures were extracted from this paper.",
+        "export_header": "Export your research notes",
+        "export_caption": "Create a source-separated Markdown report that you can keep, edit, or share.",
+        "export_includes": "Includes grounded summaries, keywords, and domain evidence for every paper.",
+        "prepare_report": "Prepare Markdown report",
+        "preparing_report": "Building your report…",
+        "download_report": "Download report",
+        "report_ready": "Your report is ready.",
+        "report_preview": "Preview report",
         "preview_header": "Document preview",
         "words": "words",
         "file_count": "file(s)",
@@ -107,10 +142,32 @@ UI_TEXT = {
         "app_title": "MatSci PaperLens AI",
         "app_subtitle": "面向材料科学与半导体论文的本地证据式 AI/NLP 阅读助手。",
         "hero_badge": "本地运行 · 基于原文证据 · 支持多论文",
-        "upload_label": "上传一篇或多篇 PDF/TXT 论文",
-        "sample_checkbox": "使用内置材料科学示例文本",
+        "benefit_private": "默认保护隐私",
+        "benefit_private_detail": "无需 API Key",
+        "benefit_grounded": "证据优先",
+        "benefit_grounded_detail": "始终显示来源",
+        "benefit_compare": "为科研而设计",
+        "benefit_compare_detail": "阅读并对比多篇论文",
+        "step_upload": "1 · 添加论文",
+        "step_upload_detail": "上传 PDF、TXT 或 Markdown",
+        "step_explore": "2 · 探索证据",
+        "step_explore_detail": "摘要、问答与对比",
+        "step_export": "3 · 保存成果",
+        "step_export_detail": "下载 Markdown 报告",
+        "upload_label": "上传一篇或多篇 PDF、TXT 或 Markdown 论文",
+        "sample_checkbox": "体验内置示例（无需上传）",
         "settings": "设置",
         "language": "语言",
+        "analysis_controls": "分析参数",
+        "reset_workspace": "重置工作区",
+        "star_project": "在 GitHub 为项目加星",
+        "star_note": "如果它对你有帮助，一个 GitHub Star 能让更多研究者发现它。",
+        "processing_documents": "正在读取上传的论文…",
+        "processing_file": "正在读取",
+        "processing_complete": "论文已准备完成",
+        "processing_partial": "部分文件无法读取",
+        "file_errors": "查看文件错误",
+        "workspace_ready": "工作区已就绪 · 论文：{documents} · 图像：{figures}。请选择下方工具。",
         "summary_sentences": "摘要句子数量",
         "num_keywords": "关键词数量",
         "retrieved_passages": "检索证据段落数量",
@@ -118,6 +175,7 @@ UI_TEXT = {
         "sidebar_tip": "提示：可以上传一篇或多篇论文。既可以单篇分析，也可以多篇横向对比。",
         "no_docs": "请上传论文，或启用示例文本。",
         "documents": "文档数量",
+        "figures_metric": "图像数量",
         "total_words": "约总词数",
         "mode": "模式",
         "multi_doc": "多论文",
@@ -128,6 +186,7 @@ UI_TEXT = {
         "compare_tab": "论文对比",
         "domain_tab": "领域提示",
         "figures_tab": "图像解读",
+        "export_tab": "导出",
         "preview_tab": "文本预览",
         "summary_header": "证据式摘要",
         "summary_caption": "默认情况下，每篇上传论文会被单独总结，避免多篇内容混在一起。",
@@ -179,6 +238,14 @@ UI_TEXT = {
         "unknown": "无法确认",
         "no_figures": "没有提取到有效的栅格图像。PDF 可能是扫描件、只含矢量图，或只含很小的装饰图片。",
         "no_figures_document": "这篇论文没有提取到有效的栅格图像。",
+        "export_header": "导出研究笔记",
+        "export_caption": "生成按来源分隔的 Markdown 报告，方便保存、编辑或分享。",
+        "export_includes": "报告包含每篇论文的证据式摘要、关键词和领域证据。",
+        "prepare_report": "生成 Markdown 报告",
+        "preparing_report": "正在生成报告…",
+        "download_report": "下载报告",
+        "report_ready": "报告已准备完成。",
+        "report_preview": "预览报告",
         "preview_header": "文本预览",
         "words": "词",
         "file_count": "个文件",
@@ -189,6 +256,73 @@ UI_TEXT = {
 def t(key: str) -> str:
     """Translate UI text based on selected language."""
     return UI_TEXT[st.session_state["language"]].get(key, key)
+
+
+@st.cache_data(show_spinner=False)
+def process_pdf_upload(file_bytes: bytes, document_name: str):
+    """Parse one PDF once and reuse the result across Streamlit reruns."""
+    text = clean_text(extract_text_from_pdf(BytesIO(file_bytes)))
+    figures = extract_figures_from_pdf(file_bytes, document_name=document_name)
+    return text, figures
+
+
+@st.cache_data(show_spinner=False)
+def cached_summary(text: str, max_sentences: int) -> str:
+    return summarize_text(text, max_sentences=max_sentences)
+
+
+@st.cache_data(show_spinner=False)
+def cached_keywords(text: str, top_n: int):
+    return extract_keywords(text, top_n=top_n)
+
+
+@st.cache_data(show_spinner=False)
+def cached_answer(
+    documents: tuple[str, ...],
+    query: str,
+    document_names: tuple[str, ...],
+    top_k: int,
+):
+    return answer_question(
+        documents=list(documents),
+        query=query,
+        document_names=list(document_names),
+        top_k=top_k,
+        max_answer_sentences=4,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def cached_comparison(
+    documents: tuple[str, ...],
+    document_names: tuple[str, ...],
+    max_snippets: int,
+):
+    return compare_documents(
+        documents=list(documents),
+        document_names=list(document_names),
+        max_snippets_per_dimension=max_snippets,
+    )
+
+
+@st.cache_data(show_spinner=False)
+def cached_domain_hints(text: str):
+    return find_domain_hints(text)
+
+
+@st.cache_data(show_spinner=False)
+def cached_markdown_report(
+    documents: tuple[str, ...],
+    document_names: tuple[str, ...],
+    max_summary_sentences: int,
+    max_keywords: int,
+) -> str:
+    return build_markdown_report(
+        documents,
+        document_names,
+        max_summary_sentences=max_summary_sentences,
+        top_keywords=max_keywords,
+    )
 
 
 def inject_css() -> None:
@@ -233,6 +367,33 @@ def inject_css() -> None:
             font-weight: 600;
         }
 
+        .benefit-grid, .step-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 0.75rem;
+            margin: 0.95rem 0 1.15rem 0;
+        }
+
+        .benefit-item, .step-item {
+            padding: 0.8rem 0.9rem;
+            border-radius: 0.85rem;
+            border: 1px solid rgba(49, 51, 63, 0.10);
+            background: rgba(250, 250, 252, 0.82);
+        }
+
+        .benefit-title, .step-title {
+            color: #262730;
+            font-size: 0.92rem;
+            font-weight: 700;
+            margin-bottom: 0.18rem;
+        }
+
+        .benefit-detail, .step-detail {
+            color: #6b7280;
+            font-size: 0.82rem;
+            line-height: 1.35;
+        }
+
         .section-card {
             padding: 1rem 1.15rem;
             border-radius: 0.9rem;
@@ -267,23 +428,16 @@ def inject_css() -> None:
             font-size: 0.88rem;
             color: #6b7280;
         }
+
+        @media (max-width: 760px) {
+            .benefit-grid, .step-grid {
+                grid-template-columns: 1fr;
+            }
+        }
         </style>
         """,
         unsafe_allow_html=True,
     )
-
-
-def read_uploaded_file(uploaded_file) -> str:
-    """Read PDF or TXT content from a Streamlit uploaded file."""
-    name = uploaded_file.name.lower()
-
-    if name.endswith(".pdf"):
-        return extract_text_from_pdf(BytesIO(uploaded_file.getvalue()))
-
-    if name.endswith(".txt") or name.endswith(".md"):
-        return uploaded_file.read().decode("utf-8", errors="ignore")
-
-    return uploaded_file.read().decode("utf-8", errors="ignore")
 
 
 def get_target_documents(
@@ -306,7 +460,7 @@ def approx_word_count(text: str) -> int:
 
 def render_doc_chips(document_names: list[str]) -> None:
     chips = "".join(
-        f'<span class="doc-chip">{name}</span>'
+        f'<span class="doc-chip">{escape(name)}</span>'
         for name in document_names
     )
     st.markdown(chips, unsafe_allow_html=True)
@@ -346,6 +500,12 @@ def localize_analysis_markdown(markdown_text: str) -> str:
 
 if "language" not in st.session_state:
     st.session_state["language"] = "English"
+if "uploader_version" not in st.session_state:
+    st.session_state["uploader_version"] = 0
+if "use_sample" not in st.session_state:
+    st.session_state["use_sample"] = True
+if "last_upload_signature" not in st.session_state:
+    st.session_state["last_upload_signature"] = ()
 
 
 with st.sidebar:
@@ -358,12 +518,27 @@ with st.sidebar:
     )
     st.session_state["language"] = language
 
-    max_summary_sentences = st.slider(t("summary_sentences"), 3, 10, 5)
-    max_keywords = st.slider(t("num_keywords"), 5, 30, 15)
-    top_k = st.slider(t("retrieved_passages"), 1, 8, 4)
+    with st.expander(t("analysis_controls"), expanded=False):
+        max_summary_sentences = st.slider(t("summary_sentences"), 3, 10, 5)
+        max_keywords = st.slider(t("num_keywords"), 5, 30, 15)
+        top_k = st.slider(t("retrieved_passages"), 1, 8, 4)
+
+    if st.button(t("reset_workspace"), use_container_width=True):
+        st.session_state["uploader_version"] += 1
+        st.session_state["use_sample"] = True
+        st.session_state["last_upload_signature"] = ()
+        st.session_state.pop("report_content", None)
+        st.session_state.pop("report_signature", None)
+        st.rerun()
 
     st.markdown("---")
     st.markdown(t("sidebar_tip"))
+    st.caption(t("star_note"))
+    st.link_button(
+        f"⭐ {t('star_project')}",
+        "https://github.com/Gardenia-hash/mat-sci-paperlens-ai",
+        use_container_width=True,
+    )
 
 
 inject_css()
@@ -375,6 +550,40 @@ st.markdown(
         <div class="hero-title">🔬 {t("app_title")}</div>
         <div class="hero-subtitle">{t("app_subtitle")}</div>
         <span class="hero-badge">{t("hero_badge")}</span>
+        <div class="benefit-grid">
+            <div class="benefit-item">
+                <div class="benefit-title">🔒 {t("benefit_private")}</div>
+                <div class="benefit-detail">{t("benefit_private_detail")}</div>
+            </div>
+            <div class="benefit-item">
+                <div class="benefit-title">📎 {t("benefit_grounded")}</div>
+                <div class="benefit-detail">{t("benefit_grounded_detail")}</div>
+            </div>
+            <div class="benefit-item">
+                <div class="benefit-title">🧪 {t("benefit_compare")}</div>
+                <div class="benefit-detail">{t("benefit_compare_detail")}</div>
+            </div>
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown(
+    f"""
+    <div class="step-grid">
+        <div class="step-item">
+            <div class="step-title">{t("step_upload")}</div>
+            <div class="step-detail">{t("step_upload_detail")}</div>
+        </div>
+        <div class="step-item">
+            <div class="step-title">{t("step_explore")}</div>
+            <div class="step-detail">{t("step_explore_detail")}</div>
+        </div>
+        <div class="step-item">
+            <div class="step-title">{t("step_export")}</div>
+            <div class="step-detail">{t("step_export_detail")}</div>
+        </div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -385,37 +594,78 @@ uploaded_files = st.file_uploader(
     t("upload_label"),
     type=["pdf", "txt", "md"],
     accept_multiple_files=True,
+    key=f"paper_uploader_{st.session_state['uploader_version']}",
 )
 
-use_sample = st.checkbox(t("sample_checkbox"), value=not uploaded_files)
+upload_signature = tuple(
+    (uploaded_file.name, uploaded_file.size)
+    for uploaded_file in (uploaded_files or [])
+)
+if upload_signature and upload_signature != st.session_state["last_upload_signature"]:
+    st.session_state["use_sample"] = False
+    st.session_state["last_upload_signature"] = upload_signature
+
+use_sample = st.checkbox(t("sample_checkbox"), key="use_sample")
 
 documents = []
 document_names = []
 figures_by_document = {}
+processing_errors = []
 
 if uploaded_files:
-    for uploaded_file in uploaded_files:
-        raw_text = read_uploaded_file(uploaded_file)
-        text = clean_text(raw_text)
-        figures = []
-        if uploaded_file.name.lower().endswith(".pdf"):
-            figures = extract_figures_from_pdf(
-                uploaded_file.getvalue(),
-                document_name=uploaded_file.name,
+    with st.status(t("processing_documents"), expanded=False) as status:
+        for uploaded_file in uploaded_files:
+            display_name = make_unique_document_name(
+                uploaded_file.name,
+                document_names,
             )
+            status.write(f"{t('processing_file')}: {display_name}")
 
-        if text or figures:
-            documents.append(text)
-            document_names.append(uploaded_file.name)
-            figures_by_document[uploaded_file.name] = figures
+            try:
+                file_bytes = uploaded_file.getvalue()
+                if uploaded_file.name.lower().endswith(".pdf"):
+                    text, figures = process_pdf_upload(file_bytes, display_name)
+                else:
+                    text = clean_text(file_bytes.decode("utf-8", errors="ignore"))
+                    figures = []
+
+                if text or figures:
+                    documents.append(text)
+                    document_names.append(display_name)
+                    figures_by_document[display_name] = figures
+                else:
+                    processing_errors.append(
+                        f"{display_name}: no readable text or raster figures were found."
+                    )
+            except Exception as exc:
+                processing_errors.append(f"{display_name}: {exc}")
+
+        status.update(
+            label=(
+                t("processing_partial")
+                if processing_errors
+                else t("processing_complete")
+            ),
+            state="error" if processing_errors else "complete",
+            expanded=bool(processing_errors),
+        )
+
+if processing_errors:
+    with st.expander(t("file_errors"), expanded=True):
+        for error in processing_errors:
+            st.error(error)
 
 if use_sample:
     sample_path = Path("data/sample_materials_text.txt")
     if sample_path.exists():
         sample_text = clean_text(sample_path.read_text(encoding="utf-8"))
+        sample_name = make_unique_document_name(
+            "sample_materials_text.txt",
+            document_names,
+        )
         documents.append(sample_text)
-        document_names.append("sample_materials_text.txt")
-        figures_by_document["sample_materials_text.txt"] = []
+        document_names.append(sample_name)
+        figures_by_document[sample_name] = []
 
 if not documents:
     st.info(t("no_docs"))
@@ -423,8 +673,16 @@ if not documents:
 
 combined_text = "\n\n".join(documents)
 total_words = sum(approx_word_count(doc) for doc in documents)
+total_figures = sum(len(items) for items in figures_by_document.values())
 
-metric_col_1, metric_col_2, metric_col_3 = st.columns(3)
+st.success(
+    t("workspace_ready").format(
+        documents=len(documents),
+        figures=total_figures,
+    )
+)
+
+metric_col_1, metric_col_2, metric_col_3, metric_col_4 = st.columns(4)
 
 with metric_col_1:
     st.metric(t("documents"), len(documents))
@@ -433,6 +691,9 @@ with metric_col_2:
     st.metric(t("total_words"), f"{total_words:,}")
 
 with metric_col_3:
+    st.metric(t("figures_metric"), total_figures)
+
+with metric_col_4:
     st.metric(t("mode"), t("multi_doc") if len(documents) > 1 else t("single_doc"))
 
 render_doc_chips(document_names)
@@ -445,6 +706,7 @@ tabs = st.tabs(
         t("compare_tab"),
         t("domain_tab"),
         t("figures_tab"),
+        t("export_tab"),
         t("preview_tab"),
     ]
 )
@@ -454,25 +716,28 @@ with tabs[0]:
     st.subheader(t("summary_header"))
     st.caption(t("summary_caption"))
 
-    summary_mode = st.radio(
-        t("summary_mode"),
-        [t("separate_summaries"), t("combined_summary")],
-        horizontal=True,
-    )
+    if len(documents) > 1:
+        summary_mode = st.radio(
+            t("summary_mode"),
+            [t("separate_summaries"), t("combined_summary")],
+            horizontal=True,
+        )
+    else:
+        summary_mode = t("separate_summaries")
 
     if summary_mode == t("separate_summaries"):
         for doc_name, doc_text in zip(document_names, documents):
             with st.expander(doc_name, expanded=len(documents) <= 2):
-                summary = summarize_text(
+                summary = cached_summary(
                     doc_text,
-                    max_sentences=max_summary_sentences,
+                    max_summary_sentences,
                 )
                 st.markdown(localize_analysis_markdown(summary))
     else:
         st.warning(t("combined_summary_warning"))
-        summary = summarize_text(
+        summary = cached_summary(
             combined_text,
-            max_sentences=max_summary_sentences,
+            max_summary_sentences,
         )
         st.markdown(localize_analysis_markdown(summary))
 
@@ -481,16 +746,19 @@ with tabs[1]:
     st.subheader(t("keywords_header"))
     st.caption(t("keywords_caption"))
 
-    keyword_mode = st.radio(
-        t("keyword_mode"),
-        [t("by_paper"), t("combined_keywords")],
-        horizontal=True,
-    )
+    if len(documents) > 1:
+        keyword_mode = st.radio(
+            t("keyword_mode"),
+            [t("by_paper"), t("combined_keywords")],
+            horizontal=True,
+        )
+    else:
+        keyword_mode = t("by_paper")
 
     if keyword_mode == t("by_paper"):
         for doc_name, doc_text in zip(document_names, documents):
             with st.expander(doc_name, expanded=len(documents) <= 2):
-                keywords = extract_keywords(doc_text, top_n=max_keywords)
+                keywords = cached_keywords(doc_text, max_keywords)
 
                 if not keywords.empty:
                     st.dataframe(
@@ -501,7 +769,7 @@ with tabs[1]:
                 else:
                     st.warning(t("no_keywords_doc"))
     else:
-        keywords = extract_keywords(combined_text, top_n=max_keywords)
+        keywords = cached_keywords(combined_text, max_keywords)
 
         if not keywords.empty:
             st.dataframe(
@@ -517,15 +785,16 @@ with tabs[2]:
     st.subheader(t("ask_header"))
     st.caption(t("ask_caption"))
 
-    target_options = [t("all_papers")] + document_names
-
-    target_label = st.selectbox(
-        t("question_target"),
-        target_options,
-        index=0,
-    )
-
-    target_index = target_options.index(target_label)
+    if len(documents) > 1:
+        target_options = [t("all_papers")] + document_names
+        target_label = st.selectbox(
+            t("question_target"),
+            target_options,
+            index=0,
+        )
+        target_index = target_options.index(target_label)
+    else:
+        target_index = 1
 
     if st.session_state["language"] == "中文":
         example_questions = [
@@ -573,12 +842,11 @@ with tabs[2]:
                 document_names,
             )
 
-            qa_result = answer_question(
-                documents=target_documents,
-                query=query,
-                document_names=target_document_names,
-                top_k=top_k,
-                max_answer_sentences=4,
+            qa_result = cached_answer(
+                tuple(target_documents),
+                query,
+                tuple(target_document_names),
+                top_k,
             )
 
             st.markdown(localize_analysis_markdown(qa_result["answer"]))
@@ -611,10 +879,10 @@ with tabs[3]:
             value=3,
         )
 
-        comparison = compare_documents(
-            documents=documents,
-            document_names=document_names,
-            max_snippets_per_dimension=max_compare_snippets,
+        comparison = cached_comparison(
+            tuple(documents),
+            tuple(document_names),
+            max_compare_snippets,
         )
 
         st.markdown(f"### {t('core_table')}")
@@ -659,7 +927,7 @@ with tabs[4]:
 
     for doc_name, doc_text in zip(document_names, documents):
         with st.expander(doc_name, expanded=len(documents) == 1):
-            hints = find_domain_hints(doc_text)
+            hints = cached_domain_hints(doc_text)
 
             for category, snippets in hints.items():
                 st.markdown(f"### {category.replace('_', ' ').title()}")
@@ -675,15 +943,17 @@ with tabs[5]:
     st.subheader(t("figures_header"))
     st.caption(t("figures_caption"))
 
-    total_figures = sum(len(items) for items in figures_by_document.values())
     if total_figures == 0:
         st.info(t("no_figures"))
     else:
-        figure_document = st.selectbox(
-            t("figure_document"),
-            document_names,
-            key="figure_document",
-        )
+        if len(document_names) > 1:
+            figure_document = st.selectbox(
+                t("figure_document"),
+                document_names,
+                key="figure_document",
+            )
+        else:
+            figure_document = document_names[0]
         available_figures = figures_by_document.get(figure_document, [])
 
         if not available_figures:
@@ -736,6 +1006,43 @@ with tabs[5]:
 
 
 with tabs[6]:
+    st.subheader(t("export_header"))
+    st.caption(t("export_caption"))
+    st.info(t("export_includes"))
+
+    workspace_signature = tuple(
+        (name, len(document), hash(document))
+        for name, document in zip(document_names, documents)
+    )
+
+    if st.button(t("prepare_report"), type="primary"):
+        with st.spinner(t("preparing_report")):
+            st.session_state["report_content"] = cached_markdown_report(
+                tuple(documents),
+                tuple(document_names),
+                max_summary_sentences,
+                max_keywords,
+            )
+            st.session_state["report_signature"] = workspace_signature
+
+    report_content = st.session_state.get("report_content")
+    if (
+        report_content
+        and st.session_state.get("report_signature") == workspace_signature
+    ):
+        st.success(t("report_ready"))
+        st.download_button(
+            t("download_report"),
+            data=report_content,
+            file_name="matsci-paperlens-report.md",
+            mime="text/markdown",
+            use_container_width=True,
+        )
+        with st.expander(t("report_preview"), expanded=False):
+            st.markdown(report_content)
+
+
+with tabs[7]:
     st.subheader(t("preview_header"))
 
     for name, doc in zip(document_names, documents):
