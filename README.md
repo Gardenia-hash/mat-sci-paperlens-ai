@@ -11,6 +11,7 @@ The interface supports English and Chinese. Chinese mode localizes the UI and an
 - Streamlit web interface with English / Chinese UI
 - PDF, TXT, and Markdown upload
 - PyMuPDF text extraction and scientific-PDF noise cleanup
+- PDF hard-wrap reconstruction, scientific-abbreviation protection, and incomplete-fragment filtering
 - Section-aware extractive summaries
 - Per-paper or explicitly combined keyword extraction
 - English or Chinese grounded questions against one selected paper or all papers
@@ -99,10 +100,10 @@ mat-sci-paperlens-ai/
 
 ## How it works
 
-- **Summaries:** section-aware TF-IDF ranking with sentence cleanup and redundancy control
+- **Summaries:** hard-wrapped PDF lines are rebuilt into complete sentences, then selected evidence is ordered into a readable extractive overview
 - **Keywords:** unigram / bigram TF-IDF features
-- **Grounded QA:** passage retrieval plus extractive sentence selection and confidence scoring
-- **Comparison:** evidence snippets collected independently from each paper
+- **Grounded QA:** sentence-safe passage retrieval, scored intent detection, relevance filtering, source isolation, and document-order integration
+- **Comparison:** complete evidence sentences are selected independently per paper and restored to document order
 - **Figures:** PyMuPDF embedded-image extraction, page-aware metadata, spatially nearest caption association, and text-only interpretation
 
 ## Roadmap
@@ -111,6 +112,7 @@ mat-sci-paperlens-ai/
 - [x] English / Chinese interface
 - [x] Raster figure, page, and caption extraction
 - [x] Grounded text-only figure interpretation
+- [x] Complete-sentence reconstruction and integrated extractive output
 - [ ] Page-aware evidence citations for Summary / QA / Compare
 - [ ] Better multi-column and wrapped-caption association
 - [ ] OCR support for scanned PDFs

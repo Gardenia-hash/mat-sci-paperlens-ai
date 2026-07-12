@@ -8,7 +8,7 @@ from typing import BinaryIO, Iterable, Union
 import fitz
 
 from src.models import FigureExplanation, FigureRecord
-from src.text_utils import clean_text
+from src.text_utils import clean_text, split_sentences
 
 
 PdfInput = Union[str, Path, bytes, bytearray, BinaryIO]
@@ -93,7 +93,8 @@ def _nearby_text(page: fitz.Page, image_rect: fitz.Rect, caption: str | None) ->
         if text and text != caption:
             snippets.append(text)
 
-    return " ".join(snippets)[:1600]
+    complete_sentences = split_sentences(" ".join(snippets))
+    return " ".join(complete_sentences[:4])[:1600]
 
 
 def extract_figures_from_pdf(

@@ -7,7 +7,7 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
-from src.text_utils import clean_text, split_passages, split_sentences
+from src.text_utils import clean_text, is_complete_sentence, split_passages, split_sentences
 
 
 SECTION_ALIASES = {
@@ -125,6 +125,8 @@ DOMAIN_KEYWORDS = {
         "tem",
         "fib",
         "xrd",
+        "x-ray diffraction",
+        "x ray diffraction",
         "raman",
         "afm",
         "ebsd",
@@ -132,6 +134,9 @@ DOMAIN_KEYWORDS = {
         "ellipsometry",
         "metrology",
         "microscopy",
+        "spectroscopy",
+        "characteriz",
+        "diffract",
     ],
     "results_or_performance": [
         "increase",
@@ -235,13 +240,21 @@ def _is_bad_summary_sentence(sentence: str) -> bool:
     if not sentence:
         return True
 
-    words = sentence.split()
-    lower_sentence = sentence.lower()
-
-    if len(words) < 8:
+    if not is_complete_sentence(sentence):
         return True
 
-    if len(words) > 85:
+    words = sentence.split()
+    lower_sentence = sentence.lower()
+    cjk_char_count = len(re.findall(r"[\u3400-\u9fff]", sentence))
+    has_cjk_text = cjk_char_count >= 6
+
+    if has_cjk_text and cjk_char_count < 8:
+        return True
+
+    if not has_cjk_text and len(words) < 4:
+        return True
+
+    if (has_cjk_text and len(sentence) > 450) or (not has_cjk_text and len(words) > 85):
         return True
 
     metadata_patterns = [
@@ -299,7 +312,7 @@ def _is_bad_summary_sentence(sentence: str) -> bool:
         return True
 
     single_char_tokens = sum(1 for word in words if len(word) == 1)
-    if single_char_tokens / max(len(words), 1) > 0.22:
+    if not has_cjk_text and single_char_tokens / max(len(words), 1) > 0.22:
         return True
 
     alphabetic_chars = sum(ch.isalpha() for ch in sentence)
@@ -373,6 +386,7 @@ def _build_summary_candidates(text: str) -> List[Dict[str, object]]:
                 {
                     "section": section,
                     "position": position,
+                    "order": len(candidates),
                     "sentence": sentence,
                 }
             )
@@ -458,79 +472,75 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
     candidate_sentences = [str(item["sentence"]) for item in candidates]
 
     if len(candidate_sentences) <= max_sentences:
-        return "\n".join(f"- {sentence}" for sentence in candidate_sentences)
+        selected = candidates
+    else:
+        try:
+            vectorizer = TfidfVectorizer(
+                stop_words="english",
+                ngram_range=(1, 2),
+                max_df=0.90,
+                min_df=1,
+            )
+            matrix = vectorizer.fit_transform(candidate_sentences)
+            base_scores = matrix.sum(axis=1).A1
+        except ValueError:
+            selected = candidates[:max_sentences]
+        else:
+            final_scores = base_scores.copy()
 
-    try:
-        vectorizer = TfidfVectorizer(
-            stop_words="english",
-            ngram_range=(1, 2),
-            max_df=0.90,
-            min_df=1,
-        )
-        matrix = vectorizer.fit_transform(candidate_sentences)
-        base_scores = matrix.sum(axis=1).A1
-    except ValueError:
-        fallback = candidate_sentences[:max_sentences]
-        return "\n".join(f"- {sentence}" for sentence in fallback)
+            for index, item in enumerate(candidates):
+                section = str(item["section"])
+                position = int(item["position"])
+                sentence = str(item["sentence"])
 
-    final_scores = base_scores.copy()
+                final_scores[index] *= _section_weight(section)
 
-    for index, item in enumerate(candidates):
-        section = str(item["section"])
-        position = int(item["position"])
-        sentence = str(item["sentence"])
+                if position <= 2:
+                    final_scores[index] *= 1.10
 
-        final_scores[index] *= _section_weight(section)
+                final_scores[index] += _role_bonus(sentence)
 
-        if position <= 2:
-            final_scores[index] *= 1.10
-
-        final_scores[index] += _role_bonus(sentence)
-
-    selected = _select_non_redundant_sentences(
-        candidates=candidates,
-        scores=final_scores,
-        matrix=matrix,
-        max_sentences=max_sentences,
-    )
+            selected = _select_non_redundant_sentences(
+                candidates=candidates,
+                scores=final_scores,
+                matrix=matrix,
+                max_sentences=max_sentences,
+            )
 
     main_focus = _find_best_by_role(candidates, selected, "main_focus")
     method = _find_best_by_role(candidates, selected, "method")
     result = _find_best_by_role(candidates, selected, "result")
     limitation = _find_best_by_role(candidates, selected, "limitation")
 
-    used_sentences = set()
-    lines = ["### Grounded summary"]
+    ordered_selected = sorted(selected, key=lambda item: int(item.get("order", 0)))
+    integrated_overview = " ".join(str(item["sentence"]) for item in ordered_selected)
+    integrated_sentences = {str(item["sentence"]) for item in ordered_selected}
 
-    if main_focus:
-        lines.append(f"- **Main focus:** {main_focus}")
+    used_sentences = set()
+    lines = ["### Grounded summary", "", integrated_overview]
+
+    role_lines = []
+
+    if main_focus and main_focus not in integrated_sentences:
+        role_lines.append(f"- **Main focus:** {main_focus}")
         used_sentences.add(main_focus)
 
-    if method and method not in used_sentences:
-        lines.append(f"- **Approach / method:** {method}")
+    if method and method not in used_sentences and method not in integrated_sentences:
+        role_lines.append(f"- **Approach / method:** {method}")
         used_sentences.add(method)
 
-    if result and result not in used_sentences:
-        lines.append(f"- **Key result:** {result}")
+    if result and result not in used_sentences and result not in integrated_sentences:
+        role_lines.append(f"- **Key result:** {result}")
         used_sentences.add(result)
 
-    if limitation and limitation not in used_sentences:
-        lines.append(f"- **Limitation / future work:** {limitation}")
+    if limitation and limitation not in used_sentences and limitation not in integrated_sentences:
+        role_lines.append(f"- **Limitation / future work:** {limitation}")
         used_sentences.add(limitation)
 
-    supporting_points = []
-    for item in selected:
-        sentence = str(item["sentence"])
-        if sentence not in used_sentences:
-            supporting_points.append(sentence)
-        if len(supporting_points) >= max(1, max_sentences - len(used_sentences)):
-            break
-
-    if supporting_points:
+    if role_lines:
         lines.append("")
         lines.append("### Supporting points")
-        for sentence in supporting_points:
-            lines.append(f"- {sentence}")
+        lines.extend(role_lines)
 
     lines.append("")
     lines.append(
@@ -578,11 +588,13 @@ def retrieve_passages(
     """Retrieve passages that are most similar to the query."""
     all_passages = []
     passage_to_doc = []
+    passage_positions = []
 
     for doc_index, doc in enumerate(documents):
-        for passage in split_passages(doc):
+        for passage_index, passage in enumerate(split_passages(doc)):
             all_passages.append(passage)
             passage_to_doc.append(doc_index)
+            passage_positions.append(passage_index)
 
     if not all_passages or not query.strip():
         return []
@@ -606,6 +618,7 @@ def retrieve_passages(
         results.append(
             {
                 "document_index": passage_to_doc[index],
+                "passage_index": passage_positions[index],
                 "passage": all_passages[index],
                 "score": float(similarities[index]),
             }
@@ -816,12 +829,33 @@ ANSWER_BONUS_TERMS = {
 def infer_question_type(query: str) -> str:
     """Infer the user's question type from English or Chinese keywords."""
     lower_query = query.lower()
+    scores: Dict[str, float] = {}
 
     for question_type, patterns in QUESTION_TYPE_PATTERNS.items():
-        if any(pattern.lower() in lower_query for pattern in patterns):
-            return question_type
+        if question_type == "general":
+            continue
 
-    return "general"
+        score = 0.0
+        for pattern in patterns:
+            normalized_pattern = pattern.lower()
+            if re.search(r"[\u3400-\u9fff]", normalized_pattern):
+                pattern_found = normalized_pattern in lower_query
+            else:
+                boundary_pattern = (
+                    r"(?<!\w)"
+                    + re.escape(normalized_pattern).replace(r"\ ", r"\s+")
+                    + r"(?!\w)"
+                )
+                pattern_found = bool(re.search(boundary_pattern, lower_query))
+
+            if pattern_found:
+                token_count = len(normalized_pattern.split())
+                score += 1.0 + min(token_count - 1, 2) * 0.35
+
+        scores[question_type] = score
+
+    best_type, best_score = max(scores.items(), key=lambda item: item[1])
+    return best_type if best_score > 0 else "general"
 
 
 def expand_query(query: str, question_type: str) -> str:
@@ -926,6 +960,7 @@ def answer_question(
     for passage_item in retrieved:
         passage = str(passage_item["passage"])
         doc_index = int(passage_item["document_index"])
+        passage_index = int(passage_item.get("passage_index", 0))
         passage_score = float(passage_item["score"])
 
         source_name = (
@@ -934,7 +969,7 @@ def answer_question(
             else f"Document {doc_index + 1}"
         )
 
-        for sentence in split_sentences(passage):
+        for sentence_index, sentence in enumerate(split_sentences(passage)):
             sentence = _clean_sentence_for_summary(sentence)
 
             if _is_bad_summary_sentence(sentence):
@@ -945,6 +980,8 @@ def answer_question(
                     "sentence": sentence,
                     "source": source_name,
                     "document_index": doc_index,
+                    "passage_index": passage_index,
+                    "sentence_index": sentence_index,
                     "passage_score": passage_score,
                 }
             )
@@ -997,7 +1034,17 @@ def answer_question(
         reverse=True,
     )
 
-    selected_items = deduplicate_answer_sentences(scored_items)[:max_answer_sentences]
+    unique_items = deduplicate_answer_sentences(scored_items)
+    best_available_score = float(unique_items[0]["answer_score"]) if unique_items else 0.0
+    minimum_answer_score = max(0.12, best_available_score * 0.42)
+    selected_items = [
+        item
+        for item in unique_items
+        if float(item["answer_score"]) >= minimum_answer_score
+    ][:max_answer_sentences]
+
+    if not selected_items and unique_items:
+        selected_items = unique_items[:1]
 
     best_score = float(selected_items[0]["answer_score"]) if selected_items else 0.0
 
@@ -1024,8 +1071,24 @@ def answer_question(
         lines.append("")
 
     lines.append("**Answer:**")
-    for item in selected_items:
-        lines.append(f"- {item['sentence']}")
+    answers_by_source: Dict[str, List[str]] = {}
+    selected_for_output = sorted(
+        selected_items,
+        key=lambda item: (
+            int(item["document_index"]),
+            int(item.get("passage_index", 0)),
+            int(item.get("sentence_index", 0)),
+        ),
+    )
+    for item in selected_for_output:
+        source = str(item["source"])
+        answers_by_source.setdefault(source, []).append(str(item["sentence"]))
+
+    if len(answers_by_source) == 1:
+        lines.append(" ".join(next(iter(answers_by_source.values()))))
+    else:
+        for source, source_sentences in answers_by_source.items():
+            lines.append(f"- **{source}:** {' '.join(source_sentences)}")
 
     lines.append("")
     lines.append("**Evidence sources:**")
@@ -1213,7 +1276,7 @@ def _extract_dimension_snippets(
     sentences = split_sentences(text)
     scored = []
 
-    for sentence in sentences:
+    for sentence_index, sentence in enumerate(sentences):
         sentence = _clean_sentence_for_summary(sentence)
 
         if _is_bad_summary_sentence(sentence):
@@ -1226,6 +1289,7 @@ def _extract_dimension_snippets(
                 {
                     "sentence": sentence,
                     "score": score,
+                    "position": sentence_index,
                 }
             )
 
@@ -1242,12 +1306,13 @@ def _extract_dimension_snippets(
             continue
 
         seen.add(normalized)
-        selected.append(sentence)
+        selected.append(item)
 
         if len(selected) >= max_snippets:
             break
 
-    return selected
+    selected = sorted(selected, key=lambda item: int(item["position"]))
+    return [str(item["sentence"]) for item in selected]
 
 
 def _format_comparison_cell(snippets: List[str]) -> str:
@@ -1255,7 +1320,7 @@ def _format_comparison_cell(snippets: List[str]) -> str:
     if not snippets:
         return "Not clearly detected."
 
-    return "\n".join(f"- {snippet}" for snippet in snippets)
+    return " ".join(snippets)
 
 
 def _extract_top_keyword_set(text: str, top_n: int = 15) -> set:
