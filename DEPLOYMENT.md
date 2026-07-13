@@ -1,6 +1,10 @@
-# Deploy to Streamlit Community Cloud
+# Streamlit Community Cloud deployment
 
-The repository is prepared for a public Streamlit Community Cloud demo. Deployment requires the repository owner to authorize Streamlit with GitHub in a browser.
+The public demo is live and automatically follows the repository's `main` branch.
+
+## Production URL
+
+[https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/](https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/)
 
 ## Deployment coordinates
 
@@ -9,31 +13,32 @@ The repository is prepared for a public Streamlit Community Cloud demo. Deployme
 - Entrypoint: `app.py`
 - Recommended Python: `3.12`
 - Secrets: none required
-- Suggested subdomain: `matsci-paperlens-ai`
+- Current Streamlit subdomain: `mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu`
 
-## One-time deployment
+## Recreate the deployment
 
-1. Merge the deployment-preparation pull request into `main`.
-2. Open [share.streamlit.io](https://share.streamlit.io/) and continue with GitHub.
-3. Authorize Streamlit to access the public repository if prompted.
-4. Select **Create app** and then **Yup, I have an app**.
-5. Enter the repository, branch, and entrypoint shown above.
-6. Choose the suggested subdomain if it is available.
-7. Open **Advanced settings**, select Python `3.12`, and leave secrets empty.
-8. Click **Deploy** and wait for the health check to complete.
+Use these steps only if the existing app is deleted or must be recreated:
 
-## After deployment
+1. Open [share.streamlit.io](https://share.streamlit.io/) and continue with GitHub.
+2. Authorize Streamlit to access the public repository if prompted.
+3. Select **Create app** and then **Yup, I have an app**.
+4. Enter the repository, branch, and entrypoint shown above.
+5. Choose an available custom subdomain.
+6. Open **Advanced settings**, select Python `3.12`, and leave secrets empty.
+7. Click **Deploy** and wait for the health check to complete.
 
-Copy the final `https://<subdomain>.streamlit.app` URL and add it to:
+## Repository integration
 
-1. the repository homepage field;
-2. the README using Streamlit's official app badge;
-3. the GitHub repository About section or social posts.
+The production URL is published in:
+
+1. the GitHub repository homepage field;
+2. the README's official Streamlit app badge;
+3. the clickable application screenshot.
 
 Badge Markdown:
 
 ```markdown
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://<subdomain>.streamlit.app)
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/)
 ```
 
 ## Public-demo guardrails
