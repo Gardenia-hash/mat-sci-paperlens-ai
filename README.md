@@ -1,5 +1,6 @@
 # MatSci PaperLens AI
 
+[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/)
 [![Python tests](https://github.com/Gardenia-hash/mat-sci-paperlens-ai/actions/workflows/python-tests.yml/badge.svg)](https://github.com/Gardenia-hash/mat-sci-paperlens-ai/actions/workflows/python-tests.yml)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)
@@ -10,7 +11,7 @@ MatSci PaperLens AI analyzes uploaded PDF, TXT, and Markdown papers without requ
 
 The interface supports English and Chinese. Chinese mode localizes the UI and analysis labels; it does **not** translate or alter the original evidence text from a paper.
 
-![MatSci PaperLens AI overview](docs/screenshots/overview.png)
+[![MatSci PaperLens AI overview](docs/screenshots/overview.png)](https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/)
 
 ## Current features
 
@@ -81,11 +82,11 @@ Open the local URL printed by Streamlit, normally `http://localhost:8501`.
 
 The built-in materials-science example is enabled on first launch, so the interface can be explored before uploading a paper. Uploading a real file automatically switches the demo off.
 
-## Public demo deployment
+## Live demo
 
-The repository is ready for Streamlit Community Cloud with pinned production dependencies, bounded caches, upload guardrails, a project theme, and a CI health check. See [DEPLOYMENT.md](DEPLOYMENT.md) for the exact repository, branch, entrypoint, Python version, and one-time browser authorization steps.
+Open the public app at [mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app](https://mat-sci-paperlens-ai-nesmxsbkrzw5ezrce6z5pu.streamlit.app/). No account, API key, or local installation is required.
 
-Once the public URL is created, add Streamlit's official app badge here and set the same URL as the GitHub repository homepage.
+The deployment uses pinned production dependencies, bounded caches, upload guardrails, a consistent theme, and a CI health check. See [DEPLOYMENT.md](DEPLOYMENT.md) for deployment coordinates and maintenance instructions.
 
 ## Using the Figures tab
 
