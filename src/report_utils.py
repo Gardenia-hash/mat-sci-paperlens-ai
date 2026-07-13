@@ -11,6 +11,7 @@ def build_markdown_report(
     max_summary_sentences: int = 5,
     top_keywords: int = 15,
     qa_history: Sequence[dict[str, object]] | None = None,
+    document_pages: Sequence[Sequence[str]] | None = None,
 ) -> str:
     """Build a portable, source-separated Markdown report."""
     if len(documents) != len(document_names):
@@ -24,9 +25,20 @@ def build_markdown_report(
         f"Documents analyzed: {len(documents)}",
     ]
 
-    for document, name in zip(documents, document_names):
+    for document_index, (document, name) in enumerate(zip(documents, document_names)):
+        page_texts = (
+            document_pages[document_index]
+            if document_pages and document_index < len(document_pages)
+            else None
+        )
         lines.extend(["", "---", "", f"## {name}", ""])
-        lines.append(summarize_text(document, max_sentences=max_summary_sentences))
+        lines.append(
+            summarize_text(
+                document,
+                max_sentences=max_summary_sentences,
+                page_texts=page_texts,
+            )
+        )
 
         keyword_frame = extract_keywords(document, top_n=top_keywords)
         lines.extend(["", "### Keywords", ""])
@@ -38,7 +50,7 @@ def build_markdown_report(
             )
 
         lines.extend(["", "### Domain evidence", ""])
-        hints = find_domain_hints(document)
+        hints = find_domain_hints(document, page_texts=page_texts)
         detected_any = False
         for category, snippets in hints.items():
             if not snippets:

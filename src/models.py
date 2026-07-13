@@ -25,7 +25,7 @@ class FigureRecord:
 
 @dataclass(frozen=True)
 class FigureExplanation:
-    """Text-grounded figure explanation with explicit confidence levels."""
+    """Text-grounded figure explanation with explicit evidence categories."""
 
     direct_evidence: tuple[str, ...]
     reasonable_inference: tuple[str, ...]

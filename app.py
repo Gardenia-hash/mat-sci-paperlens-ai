@@ -4,7 +4,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from src.pdf_utils import extract_text_from_pdf
+from src.pdf_utils import extract_page_texts_from_pdf
 from src.figure_utils import explain_figure, extract_figures_from_pdf
 from src.document_utils import make_unique_document_name, upload_limit_violation
 from src.nlp_pipeline import (
@@ -95,6 +95,7 @@ UI_TEXT = {
         "brief_result": "Key result",
         "brief_limitation": "Limitation / future work",
         "brief_source_section": "Source section",
+        "brief_source_page": "PDF page",
         "brief_missing": "Not clearly stated in the readable text.",
         "integrated_summary": "Integrated evidence summary",
         "collection_overview": "Optional multi-paper overview",
@@ -120,7 +121,11 @@ UI_TEXT = {
         "empty_question": "Please enter a question.",
         "latest_answer": "Latest grounded answer",
         "answer_target": "Target",
-        "confidence": "Confidence",
+        "evidence_strength": "Evidence strength",
+        "evidence_strength_help": "Heuristic retrieval support—not a probability of scientific correctness.",
+        "strength_strong": "Strong",
+        "strength_moderate": "Moderate",
+        "strength_weak": "Weak",
         "answer_evidence": "Evidence passages",
         "answer_sources": "Sources used",
         "previous_questions": "Previous questions in this workspace",
@@ -128,7 +133,8 @@ UI_TEXT = {
         "show_evidence": "Show retrieved evidence passages",
         "evidence_passage": "Evidence passage",
         "source": "Source",
-        "similarity": "similarity",
+        "similarity": "lexical match",
+        "retrieval_score_help": "Lexical retrieval similarity; higher values mean closer wording, not greater scientific truth.",
         "compare_header": "Compare papers",
         "compare_caption": "Compare research focus, methods, parameters, results, and limitations across papers.",
         "need_two_docs": "Please upload at least two documents to use comparison mode. You can also upload one paper and keep the sample text enabled for testing.",
@@ -230,6 +236,7 @@ UI_TEXT = {
         "brief_result": "关键结果",
         "brief_limitation": "局限 / 未来工作",
         "brief_source_section": "原文章节",
+        "brief_source_page": "PDF 页码",
         "brief_missing": "在可读取文本中未明确表述。",
         "integrated_summary": "整合后的证据式摘要",
         "collection_overview": "可选的多论文整体概览",
@@ -255,7 +262,11 @@ UI_TEXT = {
         "empty_question": "请输入一个问题。",
         "latest_answer": "最新的证据式回答",
         "answer_target": "提问对象",
-        "confidence": "置信度",
+        "evidence_strength": "证据强度",
+        "evidence_strength_help": "表示启发式检索支持程度，不是科学结论正确概率。",
+        "strength_strong": "强",
+        "strength_moderate": "中等",
+        "strength_weak": "弱",
         "answer_evidence": "证据段落",
         "answer_sources": "使用的来源",
         "previous_questions": "当前工作区的历史问题",
@@ -263,7 +274,8 @@ UI_TEXT = {
         "show_evidence": "显示检索到的证据段落",
         "evidence_passage": "证据段落",
         "source": "来源",
-        "similarity": "相似度",
+        "similarity": "文字匹配度",
+        "retrieval_score_help": "表示文字检索相似度；数值越高仅代表措辞更接近，不代表科学结论更正确。",
         "compare_header": "论文对比",
         "compare_caption": "对比多篇论文的研究重点、方法、参数、结果与局限。",
         "need_two_docs": "请至少上传两篇文档以使用论文对比功能。也可以上传一篇论文，同时保留示例文本用于测试。",
@@ -312,19 +324,31 @@ def t(key: str) -> str:
 @st.cache_data(show_spinner=False, max_entries=16)
 def process_pdf_upload(file_bytes: bytes, document_name: str):
     """Parse one PDF once and reuse the result across Streamlit reruns."""
-    text = clean_text(extract_text_from_pdf(BytesIO(file_bytes)))
+    page_texts = tuple(
+        clean_text(page_text)
+        for page_text in extract_page_texts_from_pdf(BytesIO(file_bytes))
+    )
+    text = clean_text("\n\n".join(page for page in page_texts if page))
     figures = extract_figures_from_pdf(file_bytes, document_name=document_name)
-    return text, figures
+    return text, figures, page_texts
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def cached_summary(text: str, max_sentences: int) -> str:
-    return summarize_text(text, max_sentences=max_sentences)
+def cached_summary(
+    text: str,
+    max_sentences: int,
+    page_texts: tuple[str, ...] = (),
+) -> str:
+    return summarize_text(
+        text,
+        max_sentences=max_sentences,
+        page_texts=page_texts,
+    )
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def cached_research_brief(text: str):
-    return build_research_brief(text)
+def cached_research_brief(text: str, page_texts: tuple[str, ...] = ()):
+    return build_research_brief(text, page_texts=page_texts)
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
@@ -337,12 +361,14 @@ def cached_answer(
     documents: tuple[str, ...],
     query: str,
     document_names: tuple[str, ...],
+    document_pages: tuple[tuple[str, ...], ...],
     top_k: int,
 ):
     return answer_question(
         documents=list(documents),
         query=query,
         document_names=list(document_names),
+        document_pages=[list(pages) for pages in document_pages],
         top_k=top_k,
         max_answer_sentences=4,
     )
@@ -352,18 +378,20 @@ def cached_answer(
 def cached_comparison(
     documents: tuple[str, ...],
     document_names: tuple[str, ...],
+    document_pages: tuple[tuple[str, ...], ...],
     max_snippets: int,
 ):
     return compare_documents(
         documents=list(documents),
         document_names=list(document_names),
+        document_pages=[list(pages) for pages in document_pages],
         max_snippets_per_dimension=max_snippets,
     )
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
-def cached_domain_hints(text: str):
-    return find_domain_hints(text)
+def cached_domain_hints(text: str, page_texts: tuple[str, ...] = ()):
+    return find_domain_hints(text, page_texts=page_texts)
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
@@ -373,6 +401,7 @@ def cached_markdown_report(
     max_summary_sentences: int,
     max_keywords: int,
     qa_history: tuple[tuple[str, str, str], ...],
+    document_pages: tuple[tuple[str, ...], ...],
 ) -> str:
     qa_records = [
         {"question": question, "target": target, "answer": answer}
@@ -384,6 +413,7 @@ def cached_markdown_report(
         max_summary_sentences=max_summary_sentences,
         top_keywords=max_keywords,
         qa_history=qa_records,
+        document_pages=document_pages,
     )
 
 
@@ -506,13 +536,18 @@ def get_target_documents(
     target_index: int,
     documents: list[str],
     document_names: list[str],
+    document_pages: list[tuple[str, ...]],
 ):
     """Return selected document(s) based on user choice."""
     if target_index == 0:
-        return documents, document_names
+        return documents, document_names, document_pages
 
     selected_index = target_index - 1
-    return [documents[selected_index]], [document_names[selected_index]]
+    return (
+        [documents[selected_index]],
+        [document_names[selected_index]],
+        [document_pages[selected_index]],
+    )
 
 
 def approx_word_count(text: str) -> int:
@@ -542,16 +577,20 @@ def localize_analysis_markdown(markdown_text: str) -> str:
         "**Limitation / future work:**": "**局限 / 未来工作：**",
         "### Grounded answer": "### 基于原文证据的回答",
         "**Detected question type:**": "**识别的问题类型：**",
-        "**Confidence:**": "**置信度：**",
+        "**Evidence strength:**": "**证据强度：**",
+        "**Why:**": "**判断依据：**",
         "**Answer:**": "**回答：**",
         "**Evidence sources:**": "**证据来源：**",
-        "High": "高",
-        "Medium": "中",
-        "Low": "低",
+        "Strong": "强",
+        "Moderate": "中等",
+        "Weak": "弱",
         "This is a grounded extractive summary.": "这是基于原文抽取的证据式摘要。",
         "The wording is lightly cleaned, but the factual content is selected from the original document.": "文字经过轻微清理，但事实内容来自原始文档。",
         "This QA mode is extractive and grounded.": "当前问答模式是基于原文抽取的证据式问答。",
         "It answers by selecting relevant sentences from the uploaded document, not by inventing new claims.": "它通过选择上传文档中的相关句子回答，而不是凭空生成新结论。",
+        "The top answer sentence and its passage both had strong lexical support.": "排名最高的回答句及其所在段落都具有较强的文字匹配支持。",
+        "Relevant complete source sentences passed the filters, but lexical support was not consistently strong.": "相关的完整原文句子通过了筛选，但文字匹配支持并不持续强。",
+        "Only weak lexical support was found; verify the cited passage before using the answer.": "仅发现较弱的文字匹配支持；使用回答前请核对引用段落。",
     }
 
     for source, target in replacements.items():
@@ -698,6 +737,7 @@ use_sample = st.checkbox(t("sample_checkbox"), key="use_sample")
 
 documents = []
 document_names = []
+document_pages: list[tuple[str, ...]] = []
 figures_by_document = {}
 processing_errors = []
 
@@ -713,14 +753,16 @@ if uploaded_files:
             try:
                 file_bytes = uploaded_file.getvalue()
                 if uploaded_file.name.lower().endswith(".pdf"):
-                    text, figures = process_pdf_upload(file_bytes, display_name)
+                    text, figures, page_texts = process_pdf_upload(file_bytes, display_name)
                 else:
                     text = clean_text(file_bytes.decode("utf-8", errors="ignore"))
                     figures = []
+                    page_texts = ()
 
                 if text or figures:
                     documents.append(text)
                     document_names.append(display_name)
+                    document_pages.append(tuple(page_texts))
                     figures_by_document[display_name] = figures
                 else:
                     processing_errors.append(
@@ -754,6 +796,7 @@ if use_sample:
         )
         documents.append(sample_text)
         document_names.append(sample_name)
+        document_pages.append(())
         figures_by_document[sample_name] = []
 
 if not documents:
@@ -826,7 +869,8 @@ with tabs[0]:
 
     brief_document_index = document_names.index(brief_document_name)
     brief_document_text = documents[brief_document_index]
-    brief = cached_research_brief(brief_document_text)
+    brief_page_texts = document_pages[brief_document_index]
+    brief = cached_research_brief(brief_document_text, brief_page_texts)
     coverage_percent = round(float(brief["coverage"]) * 100)
 
     coverage_col, source_col = st.columns([1, 2])
@@ -851,7 +895,12 @@ with tabs[0]:
                     if item["detected"]:
                         st.write(item["evidence"])
                         section_name = str(item.get("section") or "body").replace("_", " ").title()
-                        st.caption(f"{t('brief_source_section')}: {section_name}")
+                        source_parts = [f"{t('brief_source_section')}: {section_name}"]
+                        if item.get("page_number"):
+                            source_parts.append(
+                                f"{t('brief_source_page')}: {item['page_number']}"
+                            )
+                        st.caption(" · ".join(source_parts))
                     else:
                         st.caption(t("brief_missing"))
 
@@ -859,6 +908,7 @@ with tabs[0]:
     summary = cached_summary(
         brief_document_text,
         max_summary_sentences,
+        brief_page_texts,
     )
     st.markdown(localize_analysis_markdown(summary))
 
@@ -971,16 +1021,22 @@ with tabs[2]:
         if not query.strip():
             st.warning(t("empty_question"))
         else:
-            target_documents, target_document_names = get_target_documents(
+            (
+                target_documents,
+                target_document_names,
+                target_document_pages,
+            ) = get_target_documents(
                 target_index,
                 documents,
                 document_names,
+                document_pages,
             )
 
             qa_result = cached_answer(
                 tuple(target_documents),
                 query,
                 tuple(target_document_names),
+                tuple(target_document_pages),
                 top_k,
             )
             st.session_state["qa_history"].append(
@@ -1007,7 +1063,11 @@ with tabs[2]:
             f"{t('answer_target')}: {latest_qa['target']} · {latest_qa['question']}"
         )
         answer_metric_1, answer_metric_2, answer_metric_3 = st.columns(3)
-        answer_metric_1.metric(t("confidence"), latest_result["confidence"])
+        answer_metric_1.metric(
+            t("evidence_strength"),
+            t(f"strength_{latest_result['evidence_strength'].lower()}"),
+            help=t("evidence_strength_help"),
+        )
         answer_metric_2.metric(t("answer_evidence"), len(latest_evidence))
         answer_metric_3.metric(t("answer_sources"), len(answer_sources))
         st.markdown(localize_analysis_markdown(latest_result["answer"]))
@@ -1019,8 +1079,17 @@ with tabs[2]:
                     source_index = int(item["document_index"])
                     source_name = latest_document_names[source_index]
                     st.markdown(f"#### E{i} · {t('evidence_passage')} {i}")
+                    source_parts = [f"{t('source')}: {source_name}"]
+                    if item.get("page_number"):
+                        source_parts.append(
+                            f"{t('brief_source_page')}: {item['page_number']}"
+                        )
+                    source_parts.append(
+                        f"{t('similarity')}: {item['score']:.3f}"
+                    )
                     st.caption(
-                        f"{t('source')}: {source_name} | {t('similarity')}: {item['score']:.3f}"
+                        " · ".join(source_parts),
+                        help=t("retrieval_score_help"),
                     )
                     st.write(item["passage"])
 
@@ -1058,6 +1127,7 @@ with tabs[3]:
         comparison = cached_comparison(
             tuple(documents),
             tuple(document_names),
+            tuple(document_pages),
             max_compare_snippets,
         )
 
@@ -1101,9 +1171,13 @@ with tabs[4]:
     st.subheader(t("domain_header"))
     st.caption(t("domain_caption"))
 
-    for doc_name, doc_text in zip(document_names, documents):
+    for doc_name, doc_text, page_texts in zip(
+        document_names,
+        documents,
+        document_pages,
+    ):
         with st.expander(doc_name, expanded=len(documents) == 1):
-            hints = cached_domain_hints(doc_text)
+            hints = cached_domain_hints(doc_text, page_texts)
 
             for category, snippets in hints.items():
                 st.markdown(f"### {category.replace('_', ' ').title()}")
@@ -1202,6 +1276,7 @@ with tabs[6]:
                 max_summary_sentences,
                 max_keywords,
                 qa_history_for_report,
+                tuple(document_pages),
             )
             st.session_state["report_signature"] = workspace_signature
 

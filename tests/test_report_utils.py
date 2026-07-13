@@ -43,3 +43,19 @@ def test_markdown_report_includes_saved_grounded_questions():
     assert "### Q1. Which method is used?" in report
     assert "**Target:** paper.pdf" in report
     assert "Raman spectroscopy is used. [E1]" in report
+
+
+def test_markdown_report_preserves_pdf_page_citations():
+    pages = [
+        "This work studies a ferroelectric thin film.",
+        "Raman spectroscopy characterizes the transferred layer.",
+    ]
+    report = build_markdown_report(
+        ["\n\n".join(pages)],
+        ["paper.pdf"],
+        max_summary_sentences=2,
+        document_pages=[pages],
+    )
+
+    assert "[p. 1]" in report
+    assert "[p. 2]" in report
