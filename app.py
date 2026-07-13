@@ -9,6 +9,7 @@ from src.figure_utils import explain_figure, extract_figures_from_pdf
 from src.document_utils import make_unique_document_name, upload_limit_violation
 from src.nlp_pipeline import (
     answer_question,
+    build_research_brief,
     compare_documents,
     extract_keywords,
     summarize_text,
@@ -75,7 +76,7 @@ UI_TEXT = {
         "mode": "Mode",
         "multi_doc": "Multi-paper",
         "single_doc": "Single-paper",
-        "summary_tab": "Summary",
+        "summary_tab": "Quick Read",
         "keywords_tab": "Keywords",
         "ask_tab": "Ask / Search",
         "compare_tab": "Compare Papers",
@@ -83,8 +84,20 @@ UI_TEXT = {
         "figures_tab": "Figures",
         "export_tab": "Export",
         "preview_tab": "Text Preview",
-        "summary_header": "Grounded summary",
-        "summary_caption": "Summaries are generated separately for each uploaded paper by default.",
+        "summary_header": "Paper brief",
+        "summary_caption": "Start with five evidence-backed research questions, then inspect the integrated summary.",
+        "brief_paper": "Paper to review",
+        "brief_coverage": "Brief coverage",
+        "brief_coverage_help": "Extraction coverage only—not a quality score or scientific confidence rating.",
+        "brief_main_focus": "Research focus",
+        "brief_materials_system": "Material / system",
+        "brief_method": "Approach / method",
+        "brief_result": "Key result",
+        "brief_limitation": "Limitation / future work",
+        "brief_source_section": "Source section",
+        "brief_missing": "Not clearly stated in the readable text.",
+        "integrated_summary": "Integrated evidence summary",
+        "collection_overview": "Optional multi-paper overview",
         "summary_mode": "Summary mode",
         "separate_summaries": "Separate summaries",
         "combined_summary": "Combined summary",
@@ -103,7 +116,15 @@ UI_TEXT = {
         "example_questions": "Example questions",
         "your_question": "Your question",
         "submit_answer": "Generate grounded answer",
+        "use_example": "Use this question",
         "empty_question": "Please enter a question.",
+        "latest_answer": "Latest grounded answer",
+        "answer_target": "Target",
+        "confidence": "Confidence",
+        "answer_evidence": "Evidence passages",
+        "answer_sources": "Sources used",
+        "previous_questions": "Previous questions in this workspace",
+        "clear_questions": "Clear question history",
         "show_evidence": "Show retrieved evidence passages",
         "evidence_passage": "Evidence passage",
         "source": "Source",
@@ -135,7 +156,7 @@ UI_TEXT = {
         "no_figures_document": "No meaningful raster figures were extracted from this paper.",
         "export_header": "Export your research notes",
         "export_caption": "Create a source-separated Markdown report that you can keep, edit, or share.",
-        "export_includes": "Includes grounded summaries, keywords, and domain evidence for every paper.",
+        "export_includes": "Includes grounded summaries, keywords, domain evidence, and your saved Q&A for every paper.",
         "prepare_report": "Prepare Markdown report",
         "preparing_report": "Building your report…",
         "download_report": "Download report",
@@ -190,7 +211,7 @@ UI_TEXT = {
         "mode": "模式",
         "multi_doc": "多论文",
         "single_doc": "单论文",
-        "summary_tab": "摘要",
+        "summary_tab": "速读",
         "keywords_tab": "关键词",
         "ask_tab": "问答 / 检索",
         "compare_tab": "论文对比",
@@ -198,8 +219,20 @@ UI_TEXT = {
         "figures_tab": "图像解读",
         "export_tab": "导出",
         "preview_tab": "文本预览",
-        "summary_header": "证据式摘要",
-        "summary_caption": "默认情况下，每篇上传论文会被单独总结，避免多篇内容混在一起。",
+        "summary_header": "论文速读",
+        "summary_caption": "先回答五个核心研究问题，再查看整合后的证据式摘要。",
+        "brief_paper": "选择要阅读的论文",
+        "brief_coverage": "速读覆盖度",
+        "brief_coverage_help": "仅表示可提取信息的覆盖程度，不代表论文质量或科学置信度。",
+        "brief_main_focus": "研究重点",
+        "brief_materials_system": "材料 / 体系",
+        "brief_method": "方法 / 路径",
+        "brief_result": "关键结果",
+        "brief_limitation": "局限 / 未来工作",
+        "brief_source_section": "原文章节",
+        "brief_missing": "在可读取文本中未明确表述。",
+        "integrated_summary": "整合后的证据式摘要",
+        "collection_overview": "可选的多论文整体概览",
         "summary_mode": "摘要模式",
         "separate_summaries": "按论文分别总结",
         "combined_summary": "合并总结",
@@ -218,7 +251,15 @@ UI_TEXT = {
         "example_questions": "示例问题",
         "your_question": "你的问题",
         "submit_answer": "生成基于原文证据的回答",
+        "use_example": "使用这个问题",
         "empty_question": "请输入一个问题。",
+        "latest_answer": "最新的证据式回答",
+        "answer_target": "提问对象",
+        "confidence": "置信度",
+        "answer_evidence": "证据段落",
+        "answer_sources": "使用的来源",
+        "previous_questions": "当前工作区的历史问题",
+        "clear_questions": "清空问答历史",
         "show_evidence": "显示检索到的证据段落",
         "evidence_passage": "证据段落",
         "source": "来源",
@@ -250,7 +291,7 @@ UI_TEXT = {
         "no_figures_document": "这篇论文没有提取到有效的栅格图像。",
         "export_header": "导出研究笔记",
         "export_caption": "生成按来源分隔的 Markdown 报告，方便保存、编辑或分享。",
-        "export_includes": "报告包含每篇论文的证据式摘要、关键词和领域证据。",
+        "export_includes": "报告包含每篇论文的证据式摘要、关键词、领域证据和已保存问答。",
         "prepare_report": "生成 Markdown 报告",
         "preparing_report": "正在生成报告…",
         "download_report": "下载报告",
@@ -279,6 +320,11 @@ def process_pdf_upload(file_bytes: bytes, document_name: str):
 @st.cache_data(show_spinner=False, max_entries=64)
 def cached_summary(text: str, max_sentences: int) -> str:
     return summarize_text(text, max_sentences=max_sentences)
+
+
+@st.cache_data(show_spinner=False, max_entries=64)
+def cached_research_brief(text: str):
+    return build_research_brief(text)
 
 
 @st.cache_data(show_spinner=False, max_entries=64)
@@ -326,12 +372,18 @@ def cached_markdown_report(
     document_names: tuple[str, ...],
     max_summary_sentences: int,
     max_keywords: int,
+    qa_history: tuple[tuple[str, str, str], ...],
 ) -> str:
+    qa_records = [
+        {"question": question, "target": target, "answer": answer}
+        for question, target, answer in qa_history
+    ]
     return build_markdown_report(
         documents,
         document_names,
         max_summary_sentences=max_summary_sentences,
         top_keywords=max_keywords,
+        qa_history=qa_records,
     )
 
 
@@ -516,6 +568,10 @@ if "use_sample" not in st.session_state:
     st.session_state["use_sample"] = True
 if "last_upload_signature" not in st.session_state:
     st.session_state["last_upload_signature"] = ()
+if "qa_history" not in st.session_state:
+    st.session_state["qa_history"] = []
+if "qa_query" not in st.session_state:
+    st.session_state["qa_query"] = ""
 
 
 with st.sidebar:
@@ -539,6 +595,9 @@ with st.sidebar:
         st.session_state["last_upload_signature"] = ()
         st.session_state.pop("report_content", None)
         st.session_state.pop("report_signature", None)
+        st.session_state["qa_history"] = []
+        st.session_state["qa_query"] = ""
+        st.session_state.pop("qa_workspace_signature", None)
         st.rerun()
 
     st.markdown("---")
@@ -704,6 +763,16 @@ if not documents:
 combined_text = "\n\n".join(documents)
 total_words = sum(approx_word_count(doc) for doc in documents)
 total_figures = sum(len(items) for items in figures_by_document.values())
+workspace_signature = tuple(
+    (name, len(document), hash(document))
+    for name, document in zip(document_names, documents)
+)
+if st.session_state.get("qa_workspace_signature") != workspace_signature:
+    st.session_state["qa_history"] = []
+    st.session_state["qa_query"] = ""
+    st.session_state["qa_workspace_signature"] = workspace_signature
+    st.session_state.pop("report_content", None)
+    st.session_state.pop("report_signature", None)
 
 st.success(
     t("workspace_ready").format(
@@ -747,29 +816,60 @@ with tabs[0]:
     st.caption(t("summary_caption"))
 
     if len(documents) > 1:
-        summary_mode = st.radio(
-            t("summary_mode"),
-            [t("separate_summaries"), t("combined_summary")],
-            horizontal=True,
+        brief_document_name = st.selectbox(
+            t("brief_paper"),
+            document_names,
+            key="brief_document",
         )
     else:
-        summary_mode = t("separate_summaries")
+        brief_document_name = document_names[0]
 
-    if summary_mode == t("separate_summaries"):
-        for doc_name, doc_text in zip(document_names, documents):
-            with st.expander(doc_name, expanded=len(documents) <= 2):
-                summary = cached_summary(
-                    doc_text,
-                    max_summary_sentences,
-                )
-                st.markdown(localize_analysis_markdown(summary))
-    else:
-        st.warning(t("combined_summary_warning"))
-        summary = cached_summary(
-            combined_text,
-            max_summary_sentences,
+    brief_document_index = document_names.index(brief_document_name)
+    brief_document_text = documents[brief_document_index]
+    brief = cached_research_brief(brief_document_text)
+    coverage_percent = round(float(brief["coverage"]) * 100)
+
+    coverage_col, source_col = st.columns([1, 2])
+    with coverage_col:
+        st.metric(
+            t("brief_coverage"),
+            f"{brief['detected_count']} / {brief['total_count']}",
+            help=t("brief_coverage_help"),
         )
-        st.markdown(localize_analysis_markdown(summary))
+    with source_col:
+        st.caption(t("brief_coverage_help"))
+        st.progress(coverage_percent, text=f"{coverage_percent}%")
+
+    brief_items = list(brief["items"])
+    for row_start in range(0, len(brief_items), 2):
+        columns = st.columns(2)
+        for column, item in zip(columns, brief_items[row_start : row_start + 2]):
+            with column:
+                with st.container(border=True):
+                    brief_label_key = f"brief_{item['key']}"
+                    st.markdown(f"#### {t(brief_label_key)}")
+                    if item["detected"]:
+                        st.write(item["evidence"])
+                        section_name = str(item.get("section") or "body").replace("_", " ").title()
+                        st.caption(f"{t('brief_source_section')}: {section_name}")
+                    else:
+                        st.caption(t("brief_missing"))
+
+    st.markdown(f"### {t('integrated_summary')}")
+    summary = cached_summary(
+        brief_document_text,
+        max_summary_sentences,
+    )
+    st.markdown(localize_analysis_markdown(summary))
+
+    if len(documents) > 1:
+        with st.expander(t("collection_overview"), expanded=False):
+            st.warning(t("combined_summary_warning"))
+            combined_summary = cached_summary(
+                combined_text,
+                max_summary_sentences,
+            )
+            st.markdown(localize_analysis_markdown(combined_summary))
 
 
 with tabs[1]:
@@ -825,6 +925,7 @@ with tabs[2]:
         target_index = target_options.index(target_label)
     else:
         target_index = 1
+        target_label = document_names[0]
 
     if st.session_state["language"] == "中文":
         example_questions = [
@@ -852,15 +953,19 @@ with tabs[2]:
         example_questions,
         index=0,
     )
+    if not st.session_state.get("qa_query"):
+        st.session_state["qa_query"] = selected_example
+    if st.button(t("use_example"), key="use_example_question"):
+        st.session_state["qa_query"] = selected_example
 
     with st.form("qa_form"):
         query = st.text_area(
             t("your_question"),
-            value=selected_example,
+            key="qa_query",
             height=110,
         )
 
-        submitted = st.form_submit_button(t("submit_answer"))
+        submitted = st.form_submit_button(t("submit_answer"), type="primary")
 
     if submitted:
         if not query.strip():
@@ -878,21 +983,62 @@ with tabs[2]:
                 tuple(target_document_names),
                 top_k,
             )
+            st.session_state["qa_history"].append(
+                {
+                    "question": query.strip(),
+                    "target": target_label,
+                    "document_names": tuple(target_document_names),
+                    "result": qa_result,
+                }
+            )
+            st.session_state["qa_history"] = st.session_state["qa_history"][-8:]
+            st.session_state.pop("report_content", None)
+            st.session_state.pop("report_signature", None)
 
-            st.markdown(localize_analysis_markdown(qa_result["answer"]))
+    if st.session_state["qa_history"]:
+        latest_qa = st.session_state["qa_history"][-1]
+        latest_result = latest_qa["result"]
+        latest_evidence = latest_result.get("evidence", [])
+        answer_items = latest_result.get("answer_items", [])
+        answer_sources = {str(item["source"]) for item in answer_items}
 
-            evidence = qa_result.get("evidence", [])
+        st.markdown(f"### {t('latest_answer')}")
+        st.caption(
+            f"{t('answer_target')}: {latest_qa['target']} · {latest_qa['question']}"
+        )
+        answer_metric_1, answer_metric_2, answer_metric_3 = st.columns(3)
+        answer_metric_1.metric(t("confidence"), latest_result["confidence"])
+        answer_metric_2.metric(t("answer_evidence"), len(latest_evidence))
+        answer_metric_3.metric(t("answer_sources"), len(answer_sources))
+        st.markdown(localize_analysis_markdown(latest_result["answer"]))
 
-            if evidence:
-                with st.expander(t("show_evidence"), expanded=False):
-                    for i, item in enumerate(evidence, start=1):
-                        source_index = item["document_index"]
-                        source_name = target_document_names[source_index]
-                        st.markdown(f"#### {t('evidence_passage')} {i}")
-                        st.caption(
-                            f"{t('source')}: {source_name} | {t('similarity')}: {item['score']:.3f}"
-                        )
-                        st.write(item["passage"])
+        if latest_evidence:
+            with st.expander(t("show_evidence"), expanded=False):
+                latest_document_names = list(latest_qa["document_names"])
+                for i, item in enumerate(latest_evidence, start=1):
+                    source_index = int(item["document_index"])
+                    source_name = latest_document_names[source_index]
+                    st.markdown(f"#### E{i} · {t('evidence_passage')} {i}")
+                    st.caption(
+                        f"{t('source')}: {source_name} | {t('similarity')}: {item['score']:.3f}"
+                    )
+                    st.write(item["passage"])
+
+        if len(st.session_state["qa_history"]) > 1:
+            with st.expander(t("previous_questions"), expanded=False):
+                for history_item in reversed(st.session_state["qa_history"][:-1]):
+                    st.markdown(f"**{history_item['question']}**")
+                    st.caption(f"{t('answer_target')}: {history_item['target']}")
+                    st.markdown(
+                        localize_analysis_markdown(history_item["result"]["answer"])
+                    )
+                    st.divider()
+
+        if st.button(t("clear_questions"), key="clear_question_history"):
+            st.session_state["qa_history"] = []
+            st.session_state.pop("report_content", None)
+            st.session_state.pop("report_signature", None)
+            st.rerun()
 
 
 with tabs[3]:
@@ -1040,18 +1186,22 @@ with tabs[6]:
     st.caption(t("export_caption"))
     st.info(t("export_includes"))
 
-    workspace_signature = tuple(
-        (name, len(document), hash(document))
-        for name, document in zip(document_names, documents)
-    )
-
     if st.button(t("prepare_report"), type="primary"):
         with st.spinner(t("preparing_report")):
+            qa_history_for_report = tuple(
+                (
+                    str(item["question"]),
+                    str(item["target"]),
+                    str(item["result"]["answer"]),
+                )
+                for item in st.session_state["qa_history"]
+            )
             st.session_state["report_content"] = cached_markdown_report(
                 tuple(documents),
                 tuple(document_names),
                 max_summary_sentences,
                 max_keywords,
+                qa_history_for_report,
             )
             st.session_state["report_signature"] = workspace_signature
 

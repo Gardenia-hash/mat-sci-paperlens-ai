@@ -10,6 +10,7 @@ def build_markdown_report(
     document_names: Sequence[str],
     max_summary_sentences: int = 5,
     top_keywords: int = 15,
+    qa_history: Sequence[dict[str, object]] | None = None,
 ) -> str:
     """Build a portable, source-separated Markdown report."""
     if len(documents) != len(document_names):
@@ -50,5 +51,26 @@ def build_markdown_report(
 
         if not detected_any:
             lines.append("No domain-specific evidence was clearly detected.")
+
+    if qa_history:
+        lines.extend(["", "---", "", "## Questions and grounded answers", ""])
+        for index, item in enumerate(qa_history, start=1):
+            question = str(item.get("question", "")).strip()
+            target = str(item.get("target", "All papers")).strip()
+            answer = str(item.get("answer", "")).strip()
+            if not question or not answer:
+                continue
+            answer = answer.replace("### Grounded answer", "#### Grounded answer", 1)
+            answer = answer.replace("### 基于原文证据的回答", "#### 基于原文证据的回答", 1)
+            lines.extend(
+                [
+                    f"### Q{index}. {question}",
+                    "",
+                    f"**Target:** {target}",
+                    "",
+                    answer,
+                    "",
+                ]
+            )
 
     return "\n".join(lines).strip() + "\n"

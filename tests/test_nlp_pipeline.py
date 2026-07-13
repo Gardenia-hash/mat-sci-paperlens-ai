@@ -1,5 +1,6 @@
 from src.nlp_pipeline import (
     answer_question,
+    build_research_brief,
     compare_documents,
     extract_keywords,
     infer_question_type,
@@ -22,6 +23,23 @@ def test_summarize_text_returns_text():
     summary = summarize_text(SAMPLE_TEXT, max_sentences=2)
     assert isinstance(summary, str)
     assert len(summary) > 20
+
+
+def test_research_brief_reports_evidence_coverage_and_complete_sentences():
+    brief = build_research_brief(SAMPLE_TEXT)
+
+    assert brief["total_count"] == 5
+    assert brief["detected_count"] >= 4
+    assert 0.0 <= brief["coverage"] <= 1.0
+    detected_items = [item for item in brief["items"] if item["detected"]]
+    assert all(str(item["evidence"]).endswith(".") for item in detected_items)
+    assert {item["key"] for item in brief["items"]} == {
+        "main_focus",
+        "materials_system",
+        "method",
+        "result",
+        "limitation",
+    }
 
 
 def test_summary_reconstructs_wrapped_lines_into_integrated_overview():
@@ -73,6 +91,8 @@ def test_answer_question_returns_grounded_answer():
     assert "answer" in result
     assert "evidence" in result
     assert "Grounded answer" in result["answer"]
+    assert "[E1]" in result["answer"]
+    assert result["answer_items"]
 
 
 def test_question_intent_uses_whole_words_instead_of_substrings():
