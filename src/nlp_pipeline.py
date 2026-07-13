@@ -49,6 +49,20 @@ SUMMARY_ROLE_KEYWORDS = {
         "aim",
         "focus",
     ],
+    "materials_system": [
+        "material",
+        "materials",
+        "sample",
+        "compound",
+        "thin film",
+        "heterostructure",
+        "semiconductor",
+        "ferroelectric",
+        "oxide",
+        "chalcogenide",
+        "wafer",
+        "device",
+    ],
     "method": [
         "prepared",
         "fabricated",
@@ -436,6 +450,7 @@ def _find_best_by_role(
 
     preferred_sections = {
         "main_focus": ["abstract", "introduction", "body"],
+        "materials_system": ["abstract", "methods", "introduction", "body"],
         "method": ["methods", "abstract", "body"],
         "result": ["results", "discussion", "conclusion", "abstract", "body"],
         "limitation": ["conclusion", "discussion", "results", "body"],
@@ -457,6 +472,52 @@ def _find_best_by_role(
             return sentence
 
     return None
+
+
+def build_research_brief(text: str) -> Dict[str, object]:
+    """Build a five-part, evidence-backed paper brief for first-pass reading.
+
+    Each detected item is a complete sentence copied from the source text.  The
+    coverage score describes extraction coverage only; it is not a judgement of
+    paper quality or scientific certainty.
+    """
+    candidates = _build_summary_candidates(text)
+    brief_roles = (
+        "main_focus",
+        "materials_system",
+        "method",
+        "result",
+        "limitation",
+    )
+    items = []
+
+    for role in brief_roles:
+        evidence = _find_best_by_role(candidates, [], role)
+        section = None
+        if evidence:
+            matching_item = next(
+                (item for item in candidates if item["sentence"] == evidence),
+                None,
+            )
+            if matching_item:
+                section = str(matching_item["section"])
+
+        items.append(
+            {
+                "key": role,
+                "evidence": evidence,
+                "section": section,
+                "detected": evidence is not None,
+            }
+        )
+
+    detected_count = sum(bool(item["detected"]) for item in items)
+    return {
+        "items": items,
+        "detected_count": detected_count,
+        "total_count": len(items),
+        "coverage": detected_count / len(items) if items else 0.0,
+    }
 
 
 def summarize_text(text: str, max_sentences: int = 5) -> str:
@@ -930,6 +991,7 @@ def answer_question(
         return {
             "answer": "Please enter a question.",
             "evidence": [],
+            "answer_items": [],
             "question_type": "general",
             "confidence": "Low",
         }
@@ -951,6 +1013,7 @@ def answer_question(
                 "Try asking a more specific question, or upload a cleaner PDF/text file."
             ),
             "evidence": [],
+            "answer_items": [],
             "question_type": question_type,
             "confidence": "Low",
         }
@@ -994,6 +1057,7 @@ def answer_question(
                 "to form a clean answer. The PDF may contain dense formulas, broken text, or scanned content."
             ),
             "evidence": retrieved,
+            "answer_items": [],
             "question_type": question_type,
             "confidence": "Low",
         }
@@ -1071,6 +1135,10 @@ def answer_question(
         lines.append("")
 
     lines.append("**Answer:**")
+    evidence_ids = {
+        (int(item["document_index"]), int(item.get("passage_index", 0))): index
+        for index, item in enumerate(retrieved, start=1)
+    }
     answers_by_source: Dict[str, List[str]] = {}
     selected_for_output = sorted(
         selected_items,
@@ -1082,7 +1150,17 @@ def answer_question(
     )
     for item in selected_for_output:
         source = str(item["source"])
-        answers_by_source.setdefault(source, []).append(str(item["sentence"]))
+        evidence_id = evidence_ids.get(
+            (
+                int(item["document_index"]),
+                int(item.get("passage_index", 0)),
+            )
+        )
+        citation = f" [E{evidence_id}]" if evidence_id else ""
+        item["evidence_id"] = evidence_id
+        answers_by_source.setdefault(source, []).append(
+            f"{item['sentence']}{citation}"
+        )
 
     if len(answers_by_source) == 1:
         lines.append(" ".join(next(iter(answers_by_source.values()))))
@@ -1111,6 +1189,7 @@ def answer_question(
     return {
         "answer": "\n".join(lines),
         "evidence": retrieved,
+        "answer_items": selected_for_output,
         "question_type": question_type,
         "confidence": confidence,
     }

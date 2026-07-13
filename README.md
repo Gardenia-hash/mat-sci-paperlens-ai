@@ -20,17 +20,19 @@ The interface supports English and Chinese. Chinese mode localizes the UI and an
 - PDF, TXT, and Markdown upload
 - PyMuPDF text extraction and scientific-PDF noise cleanup
 - PDF hard-wrap reconstruction, scientific-abbreviation protection, and incomplete-fragment filtering
-- Section-aware extractive summaries
+- Five-part **Quick Read** briefs covering research focus, material system, method, result, and limitation
+- Extraction-coverage indicator with source-section labels (clearly separated from scientific confidence)
+- Section-aware integrated extractive summaries
 - Per-paper or explicitly combined keyword extraction
 - English or Chinese grounded questions against one selected paper or all papers
-- Confidence labels, retrieved evidence passages, and source document names
+- Persistent workspace Q&A with confidence labels, source names, and inline `[E1]` evidence references
 - Multi-paper comparison across focus, material, fabrication, characterization, parameters, results, and limitations
 - Per-paper materials-science domain hints
 - Local raster-figure extraction with source page, dimensions, format, and nearby caption
 - A dedicated **Figures / 图像解读** tab with explicit paper selection
 - Text-grounded figure interpretation separated into **Direct evidence**, **Reasonable inference**, and **Unknown**
 - Cached document analysis for smoother Streamlit interactions
-- Source-separated Markdown report export
+- Source-separated Markdown report export including saved questions and grounded answers
 - pytest coverage and GitHub Actions
 
 ## Evidence and privacy principles
@@ -129,9 +131,10 @@ mat-sci-paperlens-ai/
 
 ## How it works
 
+- **Quick Read:** complete source sentences answer five first-pass research questions and report extraction coverage without pretending it is a quality score
 - **Summaries:** hard-wrapped PDF lines are rebuilt into complete sentences, then selected evidence is ordered into a readable extractive overview
 - **Keywords:** unigram / bigram TF-IDF features
-- **Grounded QA:** sentence-safe passage retrieval, scored intent detection, relevance filtering, source isolation, and document-order integration
+- **Grounded QA:** sentence-safe passage retrieval, scored intent detection, relevance filtering, source isolation, document-order integration, and traceable evidence IDs
 - **Comparison:** complete evidence sentences are selected independently per paper and restored to document order
 - **Figures:** PyMuPDF embedded-image extraction, page-aware metadata, spatially nearest caption association, and text-only interpretation
 
@@ -144,6 +147,7 @@ mat-sci-paperlens-ai/
 - [x] Complete-sentence reconstruction and integrated extractive output
 - [x] First-run onboarding, processing feedback, caching, and Markdown report export
 - [x] Streamlit Community Cloud configuration and deployment health check
+- [x] Five-part paper brief, persistent Q&A, evidence IDs, and Q&A-aware report export
 - [ ] Page-aware evidence citations for Summary / QA / Compare
 - [ ] Better multi-column and wrapped-caption association
 - [ ] OCR support for scanned PDFs
