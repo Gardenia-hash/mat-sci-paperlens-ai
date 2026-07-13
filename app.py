@@ -6,7 +6,7 @@ import streamlit as st
 
 from src.pdf_utils import extract_text_from_pdf
 from src.figure_utils import explain_figure, extract_figures_from_pdf
-from src.document_utils import make_unique_document_name
+from src.document_utils import make_unique_document_name, upload_limit_violation
 from src.nlp_pipeline import (
     answer_question,
     compare_documents,
@@ -23,6 +23,10 @@ st.set_page_config(
     page_icon="🔬",
     layout="wide",
 )
+
+MAX_UPLOAD_FILES = 6
+MAX_TOTAL_UPLOAD_MB = 60
+MAX_TOTAL_UPLOAD_BYTES = MAX_TOTAL_UPLOAD_MB * 1024 * 1024
 
 
 UI_TEXT = {
@@ -43,6 +47,9 @@ UI_TEXT = {
         "step_export": "3 · Keep your work",
         "step_export_detail": "Download a Markdown report",
         "upload_label": "Upload one or more PDF, TXT, or Markdown papers",
+        "demo_limits": "Public demo guardrails: up to {max_files} files, 25 MB per file, {max_total_mb} MB total.",
+        "too_many_files": "Please upload no more than {max_files} files at a time.",
+        "total_size_exceeded": "The selected files exceed the {max_total_mb} MB workspace limit.",
         "sample_checkbox": "Try the built-in demo (no upload needed)",
         "settings": "Settings",
         "language": "Language",
@@ -155,6 +162,9 @@ UI_TEXT = {
         "step_export": "3 · 保存成果",
         "step_export_detail": "下载 Markdown 报告",
         "upload_label": "上传一篇或多篇 PDF、TXT 或 Markdown 论文",
+        "demo_limits": "公开演示限制：最多 {max_files} 个文件，单个文件 25 MB，总计 {max_total_mb} MB。",
+        "too_many_files": "一次最多上传 {max_files} 个文件。",
+        "total_size_exceeded": "所选文件超过工作区 {max_total_mb} MB 的总容量限制。",
         "sample_checkbox": "体验内置示例（无需上传）",
         "settings": "设置",
         "language": "语言",
@@ -258,7 +268,7 @@ def t(key: str) -> str:
     return UI_TEXT[st.session_state["language"]].get(key, key)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=16)
 def process_pdf_upload(file_bytes: bytes, document_name: str):
     """Parse one PDF once and reuse the result across Streamlit reruns."""
     text = clean_text(extract_text_from_pdf(BytesIO(file_bytes)))
@@ -266,17 +276,17 @@ def process_pdf_upload(file_bytes: bytes, document_name: str):
     return text, figures
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=64)
 def cached_summary(text: str, max_sentences: int) -> str:
     return summarize_text(text, max_sentences=max_sentences)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=64)
 def cached_keywords(text: str, top_n: int):
     return extract_keywords(text, top_n=top_n)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=128)
 def cached_answer(
     documents: tuple[str, ...],
     query: str,
@@ -292,7 +302,7 @@ def cached_answer(
     )
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=32)
 def cached_comparison(
     documents: tuple[str, ...],
     document_names: tuple[str, ...],
@@ -305,12 +315,12 @@ def cached_comparison(
     )
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=64)
 def cached_domain_hints(text: str):
     return find_domain_hints(text)
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=16)
 def cached_markdown_report(
     documents: tuple[str, ...],
     document_names: tuple[str, ...],
@@ -523,7 +533,7 @@ with st.sidebar:
         max_keywords = st.slider(t("num_keywords"), 5, 30, 15)
         top_k = st.slider(t("retrieved_passages"), 1, 8, 4)
 
-    if st.button(t("reset_workspace"), use_container_width=True):
+    if st.button(t("reset_workspace"), width="stretch"):
         st.session_state["uploader_version"] += 1
         st.session_state["use_sample"] = True
         st.session_state["last_upload_signature"] = ()
@@ -537,7 +547,7 @@ with st.sidebar:
     st.link_button(
         f"⭐ {t('star_project')}",
         "https://github.com/Gardenia-hash/mat-sci-paperlens-ai",
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -596,6 +606,26 @@ uploaded_files = st.file_uploader(
     accept_multiple_files=True,
     key=f"paper_uploader_{st.session_state['uploader_version']}",
 )
+st.caption(
+    t("demo_limits").format(
+        max_files=MAX_UPLOAD_FILES,
+        max_total_mb=MAX_TOTAL_UPLOAD_MB,
+    )
+)
+
+limit_violation = upload_limit_violation(
+    [uploaded_file.size for uploaded_file in (uploaded_files or [])],
+    max_files=MAX_UPLOAD_FILES,
+    max_total_bytes=MAX_TOTAL_UPLOAD_BYTES,
+)
+if limit_violation:
+    st.error(
+        t(limit_violation).format(
+            max_files=MAX_UPLOAD_FILES,
+            max_total_mb=MAX_TOTAL_UPLOAD_MB,
+        )
+    )
+    st.stop()
 
 upload_signature = tuple(
     (uploaded_file.name, uploaded_file.size)
@@ -763,7 +793,7 @@ with tabs[1]:
                 if not keywords.empty:
                     st.dataframe(
                         keywords,
-                        use_container_width=True,
+                        width="stretch",
                         hide_index=True,
                     )
                 else:
@@ -774,7 +804,7 @@ with tabs[1]:
         if not keywords.empty:
             st.dataframe(
                 keywords,
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
         else:
@@ -888,14 +918,14 @@ with tabs[3]:
         st.markdown(f"### {t('core_table')}")
         st.dataframe(
             comparison["table"],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
         st.markdown(f"### {t('keyword_overlap')}")
         st.dataframe(
             comparison["keyword_table"],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -973,7 +1003,7 @@ with tabs[5]:
             st.image(
                 figure.image_bytes,
                 caption=f"{t('figure_source')}: {figure.document_name} · {t('figure_page')} {figure.page_number}",
-                use_container_width=True,
+                width="stretch",
             )
 
             meta_1, meta_2, meta_3 = st.columns(3)
@@ -1036,7 +1066,7 @@ with tabs[6]:
             data=report_content,
             file_name="matsci-paperlens-report.md",
             mime="text/markdown",
-            use_container_width=True,
+            width="stretch",
         )
         with st.expander(t("report_preview"), expanded=False):
             st.markdown(report_content)
