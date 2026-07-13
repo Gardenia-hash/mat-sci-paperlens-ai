@@ -75,10 +75,73 @@ def test_retrieve_passages_returns_relevant_result():
     assert "score" in results[0]
 
 
+def test_retrieval_does_not_present_zero_similarity_passages_as_evidence():
+    results = retrieve_passages(
+        ["Raman spectroscopy characterizes the ferroelectric film."],
+        query="unrelated battery electrolyte capacity",
+        top_k=4,
+    )
+
+    assert results == []
+
+
+def test_page_aware_retrieval_and_answers_preserve_pdf_provenance():
+    pages = [
+        "The introduction describes a general semiconductor processing challenge.",
+        "Atomic layer deposition is used to grow the oxide film at 200 °C.",
+        "The conclusion reports improved electrical stability after annealing.",
+    ]
+    document = "\n\n".join(pages)
+
+    retrieved = retrieve_passages(
+        [document],
+        query="How is the oxide film grown?",
+        top_k=2,
+        document_pages=[pages],
+    )
+    result = answer_question(
+        [document],
+        query="How is the oxide film grown?",
+        document_names=["paper.pdf"],
+        document_pages=[pages],
+        top_k=2,
+    )
+
+    assert retrieved[0]["page_number"] == 2
+    assert "[p. 2]" in result["answer"]
+    assert "paper.pdf, p. 2" in result["answer"]
+    assert result["evidence_strength"] in {"Strong", "Moderate", "Weak"}
+    assert result["strength_reason"]
+
+
 def test_find_domain_hints_has_categories():
     hints = find_domain_hints(SAMPLE_TEXT)
     assert "materials_system" in hints
     assert "characterization" in hints
+
+
+def test_short_scientific_acronyms_require_term_boundaries():
+    hints = find_domain_hints(
+        "The so-called baseline procedure remains available for later evaluation."
+    )
+
+    assert hints["fabrication_or_synthesis"] == []
+
+
+def test_summary_and_brief_include_physical_pdf_page_citations():
+    pages = [
+        "This work studies a ferroelectric thin film for optical switching.",
+        "Raman spectroscopy is used to characterize the transferred film.",
+        "The results show improved switching stability after annealing.",
+    ]
+    text = "\n\n".join(pages)
+
+    summary = summarize_text(text, max_sentences=3, page_texts=pages)
+    brief = build_research_brief(text, page_texts=pages)
+
+    assert "[p. 1]" in summary
+    result_item = next(item for item in brief["items"] if item["key"] == "result")
+    assert result_item["page_number"] == 3
 
 def test_answer_question_returns_grounded_answer():
     result = answer_question(
@@ -201,3 +264,18 @@ def test_compare_documents_returns_table():
     assert "details" in result
     assert not result["table"].empty
     assert "Dimension" in result["table"].columns
+
+
+def test_comparison_uses_strict_acronym_boundaries_and_page_citations():
+    baseline = "The so-called baseline procedure remains available for evaluation."
+    deposition = "The oxide film is deposited by ALD under vacuum."
+
+    result = compare_documents(
+        [baseline, deposition],
+        document_names=["baseline.pdf", "deposition.pdf"],
+        document_pages=[[baseline], [deposition]],
+    )
+    fabrication = result["details"]["Fabrication / synthesis"]
+
+    assert fabrication["baseline.pdf"] == []
+    assert fabrication["deposition.pdf"] == [f"{deposition} [p. 1]"]

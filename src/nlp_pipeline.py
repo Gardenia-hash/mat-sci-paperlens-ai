@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List
+from typing import Dict, List, Sequence
 
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
@@ -50,9 +50,6 @@ SUMMARY_ROLE_KEYWORDS = {
         "focus",
     ],
     "materials_system": [
-        "material",
-        "materials",
-        "sample",
         "compound",
         "thin film",
         "heterostructure",
@@ -61,7 +58,13 @@ SUMMARY_ROLE_KEYWORDS = {
         "oxide",
         "chalcogenide",
         "wafer",
-        "device",
+        "alloy",
+        "ceramic",
+        "composite",
+        "perovskite",
+        "graphene",
+        "nanoparticle",
+        "nanowire",
     ],
     "method": [
         "prepared",
@@ -177,6 +180,51 @@ DOMAIN_KEYWORDS = {
         "scalability",
     ],
 }
+
+
+def _contains_term(text: str, term: str) -> bool:
+    """Match a scientific term without allowing Latin substring collisions.
+
+    For example, the acronym ``ALD`` must not match ``called``. Chinese terms
+    remain substring matched because they do not use whitespace word boundaries.
+    """
+    normalized_text = text.lower()
+    normalized_term = term.lower().strip()
+    if not normalized_term:
+        return False
+    if re.search(r"[\u3400-\u9fff]", normalized_term):
+        return normalized_term in normalized_text
+
+    pattern = (
+        r"(?<![a-z0-9])"
+        + re.escape(normalized_term).replace(r"\ ", r"\s+")
+        + r"(?![a-z0-9])"
+    )
+    return bool(re.search(pattern, normalized_text, flags=re.IGNORECASE))
+
+
+def locate_evidence_page(sentence: str, page_texts: Sequence[str] | None) -> int | None:
+    """Locate an extracted evidence sentence on a physical PDF page."""
+    if not sentence or not page_texts:
+        return None
+
+    def normalize(value: str) -> str:
+        value = re.sub(r"\[[\d,\-\s]+\]", " ", value.lower())
+        return re.sub(r"[^a-z0-9\u3400-\u9fff]+", " ", value).strip()
+
+    needle = normalize(sentence)
+    if not needle:
+        return None
+
+    for page_number, page_text in enumerate(page_texts, start=1):
+        if needle in normalize(page_text):
+            return page_number
+    return None
+
+
+def _cite_sentence(sentence: str, page_texts: Sequence[str] | None) -> str:
+    page_number = locate_evidence_page(sentence, page_texts)
+    return f"{sentence} [p. {page_number}]" if page_number else sentence
 
 
 def _normalize_heading(line: str) -> str:
@@ -365,18 +413,17 @@ def _section_weight(section: str) -> float:
 
 def _role_bonus(sentence: str) -> float:
     """Reward sentences that look like main claims, methods, results, or limitations."""
-    lower_sentence = sentence.lower()
     bonus = 0.0
 
     for role_keywords in SUMMARY_ROLE_KEYWORDS.values():
-        if any(keyword in lower_sentence for keyword in role_keywords):
+        if any(_contains_term(sentence, keyword) for keyword in role_keywords):
             bonus += 0.25
 
     domain_terms = []
     for terms in DOMAIN_KEYWORDS.values():
         domain_terms.extend(terms)
 
-    domain_hits = sum(1 for term in domain_terms if term in lower_sentence)
+    domain_hits = sum(1 for term in domain_terms if _contains_term(sentence, term))
     bonus += min(domain_hits * 0.06, 0.36)
 
     return bonus
@@ -456,25 +503,38 @@ def _find_best_by_role(
         "limitation": ["conclusion", "discussion", "results", "body"],
     }
 
-    pool = selected + candidates
+    selected_sentences = {str(item["sentence"]) for item in selected}
+    scored_candidates = []
+    section_order = preferred_sections[role]
 
-    for section in preferred_sections[role]:
-        for item in pool:
-            sentence = str(item["sentence"])
-            lower_sentence = sentence.lower()
-            if item["section"] == section and any(term in lower_sentence for term in role_terms):
-                return sentence
-
-    for item in pool:
+    for item in candidates:
         sentence = str(item["sentence"])
-        lower_sentence = sentence.lower()
-        if any(term in lower_sentence for term in role_terms):
-            return sentence
+        hits = sum(1 for term in role_terms if _contains_term(sentence, term))
+        if hits == 0:
+            continue
 
-    return None
+        section = str(item["section"])
+        section_rank = (
+            section_order.index(section)
+            if section in section_order
+            else len(section_order)
+        )
+        score = 2.0 * hits
+        score += max(0.0, (len(section_order) - section_rank) * 0.35)
+        score += max(0.0, 0.25 - int(item["position"]) * 0.03)
+        if sentence in selected_sentences:
+            score += 0.35
+        scored_candidates.append((score, -int(item["order"]), sentence))
+
+    if not scored_candidates:
+        return None
+    return max(scored_candidates)[2]
 
 
-def build_research_brief(text: str) -> Dict[str, object]:
+def build_research_brief(
+    text: str,
+    page_texts: Sequence[str] | None = None,
+) -> Dict[str, object]:
     """Build a five-part, evidence-backed paper brief for first-pass reading.
 
     Each detected item is a complete sentence copied from the source text.  The
@@ -507,6 +567,7 @@ def build_research_brief(text: str) -> Dict[str, object]:
                 "key": role,
                 "evidence": evidence,
                 "section": section,
+                "page_number": locate_evidence_page(evidence or "", page_texts),
                 "detected": evidence is not None,
             }
         )
@@ -520,7 +581,11 @@ def build_research_brief(text: str) -> Dict[str, object]:
     }
 
 
-def summarize_text(text: str, max_sentences: int = 5) -> str:
+def summarize_text(
+    text: str,
+    max_sentences: int = 5,
+    page_texts: Sequence[str] | None = None,
+) -> str:
     """Create a grounded, section-aware, readable extractive summary."""
     candidates = _build_summary_candidates(text)
 
@@ -574,7 +639,10 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
     limitation = _find_best_by_role(candidates, selected, "limitation")
 
     ordered_selected = sorted(selected, key=lambda item: int(item.get("order", 0)))
-    integrated_overview = " ".join(str(item["sentence"]) for item in ordered_selected)
+    integrated_overview = " ".join(
+        _cite_sentence(str(item["sentence"]), page_texts)
+        for item in ordered_selected
+    )
     integrated_sentences = {str(item["sentence"]) for item in ordered_selected}
 
     used_sentences = set()
@@ -583,19 +651,21 @@ def summarize_text(text: str, max_sentences: int = 5) -> str:
     role_lines = []
 
     if main_focus and main_focus not in integrated_sentences:
-        role_lines.append(f"- **Main focus:** {main_focus}")
+        role_lines.append(f"- **Main focus:** {_cite_sentence(main_focus, page_texts)}")
         used_sentences.add(main_focus)
 
     if method and method not in used_sentences and method not in integrated_sentences:
-        role_lines.append(f"- **Approach / method:** {method}")
+        role_lines.append(f"- **Approach / method:** {_cite_sentence(method, page_texts)}")
         used_sentences.add(method)
 
     if result and result not in used_sentences and result not in integrated_sentences:
-        role_lines.append(f"- **Key result:** {result}")
+        role_lines.append(f"- **Key result:** {_cite_sentence(result, page_texts)}")
         used_sentences.add(result)
 
     if limitation and limitation not in used_sentences and limitation not in integrated_sentences:
-        role_lines.append(f"- **Limitation / future work:** {limitation}")
+        role_lines.append(
+            f"- **Limitation / future work:** {_cite_sentence(limitation, page_texts)}"
+        )
         used_sentences.add(limitation)
 
     if role_lines:
@@ -645,17 +715,35 @@ def retrieve_passages(
     documents: List[str],
     query: str,
     top_k: int = 4,
+    document_pages: Sequence[Sequence[str]] | None = None,
 ) -> List[Dict[str, object]]:
-    """Retrieve passages that are most similar to the query."""
+    """Retrieve passages and retain physical PDF page provenance when available."""
     all_passages = []
     passage_to_doc = []
     passage_positions = []
+    passage_pages: list[int | None] = []
 
     for doc_index, doc in enumerate(documents):
-        for passage_index, passage in enumerate(split_passages(doc)):
+        pages = (
+            list(document_pages[doc_index])
+            if document_pages and doc_index < len(document_pages)
+            else []
+        )
+        passage_sources = []
+        if pages:
+            for page_number, page_text in enumerate(pages, start=1):
+                passage_sources.extend(
+                    (passage, page_number)
+                    for passage in split_passages(page_text)
+                )
+        else:
+            passage_sources.extend((passage, None) for passage in split_passages(doc))
+
+        for passage_index, (passage, page_number) in enumerate(passage_sources):
             all_passages.append(passage)
             passage_to_doc.append(doc_index)
             passage_positions.append(passage_index)
+            passage_pages.append(page_number)
 
     if not all_passages or not query.strip():
         return []
@@ -676,12 +764,16 @@ def retrieve_passages(
 
     results = []
     for index in top_indices:
+        similarity = float(similarities[index])
+        if similarity <= 1e-9:
+            continue
         results.append(
             {
                 "document_index": passage_to_doc[index],
                 "passage_index": passage_positions[index],
+                "page_number": passage_pages[index],
                 "passage": all_passages[index],
-                "score": float(similarities[index]),
+                "score": similarity,
             }
         )
 
@@ -808,10 +900,14 @@ QUERY_EXPANSION_TERMS = {
         "simulation",
         "calculation",
         "SEM",
+        "scanning electron microscopy",
         "TEM",
+        "transmission electron microscopy",
         "XRD",
+        "X-ray diffraction",
         "Raman",
         "AFM",
+        "atomic force microscopy",
     ],
     "result": [
         "result",
@@ -930,12 +1026,11 @@ def expand_query(query: str, question_type: str) -> str:
 
 def answer_sentence_bonus(sentence: str, question_type: str) -> float:
     """Reward sentences that match the detected question intent."""
-    lower_sentence = sentence.lower()
     bonus_terms = ANSWER_BONUS_TERMS.get(question_type, [])
 
     bonus = 0.0
     for term in bonus_terms:
-        if term.lower() in lower_sentence:
+        if _contains_term(sentence, term):
             bonus += 0.08
 
     # Sentences with direct claim language are often useful answers.
@@ -951,7 +1046,7 @@ def answer_sentence_bonus(sentence: str, question_type: str) -> float:
         "however",
     ]
 
-    if any(term in lower_sentence for term in claim_terms):
+    if any(_contains_term(sentence, term) for term in claim_terms):
         bonus += 0.15
 
     return min(bonus, 0.5)
@@ -975,12 +1070,42 @@ def deduplicate_answer_sentences(items: List[Dict[str, object]]) -> List[Dict[st
     return unique_items
 
 
+def _classify_evidence_strength(
+    selected_items: Sequence[Dict[str, object]],
+) -> tuple[str, str]:
+    """Describe retrieval support without claiming calibrated factual confidence."""
+    if not selected_items:
+        return (
+            "Weak",
+            "No clean answer sentence passed the relevance filters.",
+        )
+
+    best_answer_score = max(float(item["answer_score"]) for item in selected_items)
+    best_passage_score = max(float(item["passage_score"]) for item in selected_items)
+    if best_answer_score >= 0.35 and best_passage_score >= 0.08:
+        return (
+            "Strong",
+            "The top answer sentence and its passage both had strong lexical support.",
+        )
+    if best_answer_score >= 0.18:
+        return (
+            "Moderate",
+            "Relevant complete source sentences passed the filters, but lexical support "
+            "was not consistently strong.",
+        )
+    return (
+        "Weak",
+        "Only weak lexical support was found; verify the cited passage before using the answer.",
+    )
+
+
 def answer_question(
     documents: List[str],
     query: str,
     document_names: List[str] | None = None,
     top_k: int = 4,
     max_answer_sentences: int = 4,
+    document_pages: Sequence[Sequence[str]] | None = None,
 ) -> Dict[str, object]:
     """Generate a grounded answer from retrieved paper passages.
 
@@ -993,7 +1118,8 @@ def answer_question(
             "evidence": [],
             "answer_items": [],
             "question_type": "general",
-            "confidence": "Low",
+            "evidence_strength": "Weak",
+            "strength_reason": "No question was provided.",
         }
 
     question_type = infer_question_type(query)
@@ -1003,6 +1129,7 @@ def answer_question(
         documents=documents,
         query=expanded_query,
         top_k=top_k,
+        document_pages=document_pages,
     )
 
     if not retrieved:
@@ -1015,7 +1142,8 @@ def answer_question(
             "evidence": [],
             "answer_items": [],
             "question_type": question_type,
-            "confidence": "Low",
+            "evidence_strength": "Weak",
+            "strength_reason": "No relevant passage was retrieved.",
         }
 
     candidate_items: List[Dict[str, object]] = []
@@ -1024,6 +1152,7 @@ def answer_question(
         passage = str(passage_item["passage"])
         doc_index = int(passage_item["document_index"])
         passage_index = int(passage_item.get("passage_index", 0))
+        page_number = passage_item.get("page_number")
         passage_score = float(passage_item["score"])
 
         source_name = (
@@ -1044,6 +1173,7 @@ def answer_question(
                     "source": source_name,
                     "document_index": doc_index,
                     "passage_index": passage_index,
+                    "page_number": page_number,
                     "sentence_index": sentence_index,
                     "passage_score": passage_score,
                 }
@@ -1059,7 +1189,8 @@ def answer_question(
             "evidence": retrieved,
             "answer_items": [],
             "question_type": question_type,
-            "confidence": "Low",
+            "evidence_strength": "Weak",
+            "strength_reason": "Retrieved passages were too noisy for a clean answer.",
         }
 
     candidate_sentences = [str(item["sentence"]) for item in candidate_items]
@@ -1100,7 +1231,7 @@ def answer_question(
 
     unique_items = deduplicate_answer_sentences(scored_items)
     best_available_score = float(unique_items[0]["answer_score"]) if unique_items else 0.0
-    minimum_answer_score = max(0.12, best_available_score * 0.42)
+    minimum_answer_score = max(0.10, best_available_score * 0.35)
     selected_items = [
         item
         for item in unique_items
@@ -1110,24 +1241,18 @@ def answer_question(
     if not selected_items and unique_items:
         selected_items = unique_items[:1]
 
-    best_score = float(selected_items[0]["answer_score"]) if selected_items else 0.0
-
-    if best_score >= 0.35:
-        confidence = "High"
-    elif best_score >= 0.18:
-        confidence = "Medium"
-    else:
-        confidence = "Low"
+    evidence_strength, strength_reason = _classify_evidence_strength(selected_items)
 
     lines = [
         "### Grounded answer",
         "",
         f"**Detected question type:** `{question_type}`",
-        f"**Confidence:** `{confidence}`",
+        f"**Evidence strength:** `{evidence_strength}`",
+        f"**Why:** {strength_reason}",
         "",
     ]
 
-    if confidence == "Low":
+    if evidence_strength == "Weak":
         lines.append(
             "> The answer below is based on weak textual evidence. "
             "Please verify it against the original paper."
@@ -1136,7 +1261,11 @@ def answer_question(
 
     lines.append("**Answer:**")
     evidence_ids = {
-        (int(item["document_index"]), int(item.get("passage_index", 0))): index
+        (
+            int(item["document_index"]),
+            int(item.get("passage_index", 0)),
+            item.get("page_number"),
+        ): index
         for index, item in enumerate(retrieved, start=1)
     }
     answers_by_source: Dict[str, List[str]] = {}
@@ -1154,9 +1283,13 @@ def answer_question(
             (
                 int(item["document_index"]),
                 int(item.get("passage_index", 0)),
+                item.get("page_number"),
             )
         )
+        page_number = item.get("page_number")
         citation = f" [E{evidence_id}]" if evidence_id else ""
+        if page_number:
+            citation += f" [p. {page_number}]"
         item["evidence_id"] = evidence_id
         answers_by_source.setdefault(source, []).append(
             f"{item['sentence']}{citation}"
@@ -1174,8 +1307,10 @@ def answer_question(
 
     for item in selected_items:
         source = str(item["source"])
-        if source not in used_sources:
-            used_sources.append(source)
+        page_number = item.get("page_number")
+        source_label = f"{source}, p. {page_number}" if page_number else source
+        if source_label not in used_sources:
+            used_sources.append(source_label)
 
     for source in used_sources:
         lines.append(f"- {source}")
@@ -1191,7 +1326,8 @@ def answer_question(
         "evidence": retrieved,
         "answer_items": selected_for_output,
         "question_type": question_type,
-        "confidence": confidence,
+        "evidence_strength": evidence_strength,
+        "strength_reason": strength_reason,
     }
 
 COMPARISON_DIMENSIONS = {
@@ -1298,11 +1434,10 @@ PARAMETER_UNIT_PATTERN = re.compile(
 
 def _sentence_dimension_score(sentence: str, dimension: str, keywords: List[str]) -> float:
     """Score how relevant a sentence is to a comparison dimension."""
-    lower_sentence = sentence.lower()
     score = 0.0
 
     for keyword in keywords:
-        if keyword.lower() in lower_sentence:
+        if _contains_term(sentence, keyword):
             score += 1.0
 
     if dimension == "Parameters / settings":
@@ -1321,7 +1456,7 @@ def _sentence_dimension_score(sentence: str, dimension: str, keywords: List[str]
             "fixed",
             "varied",
         ]
-        if any(term in lower_sentence for term in condition_terms):
+        if any(_contains_term(sentence, term) for term in condition_terms):
             score += 0.8
 
     if dimension == "Research focus":
@@ -1339,7 +1474,7 @@ def _sentence_dimension_score(sentence: str, dimension: str, keywords: List[str]
             "therefore",
             "as a result",
         ]
-        if any(term in lower_sentence for term in result_terms):
+        if any(_contains_term(sentence, term) for term in result_terms):
             score += 0.8
 
     return score
@@ -1350,6 +1485,7 @@ def _extract_dimension_snippets(
     dimension: str,
     keywords: List[str],
     max_snippets: int = 3,
+    page_texts: Sequence[str] | None = None,
 ) -> List[str]:
     """Extract the most relevant evidence sentences for one comparison dimension."""
     sentences = split_sentences(text)
@@ -1391,7 +1527,10 @@ def _extract_dimension_snippets(
             break
 
     selected = sorted(selected, key=lambda item: int(item["position"]))
-    return [str(item["sentence"]) for item in selected]
+    return [
+        _cite_sentence(str(item["sentence"]), page_texts)
+        for item in selected
+    ]
 
 
 def _format_comparison_cell(snippets: List[str]) -> str:
@@ -1417,6 +1556,7 @@ def compare_documents(
     document_names: List[str],
     max_snippets_per_dimension: int = 3,
     top_keywords: int = 15,
+    document_pages: Sequence[Sequence[str]] | None = None,
 ) -> Dict[str, object]:
     """Compare two or more papers across research-relevant dimensions.
 
@@ -1449,6 +1589,11 @@ def compare_documents(
                 dimension=dimension,
                 keywords=keywords,
                 max_snippets=max_snippets_per_dimension,
+                page_texts=(
+                    document_pages[doc_index]
+                    if document_pages and doc_index < len(document_pages)
+                    else None
+                ),
             )
 
             details[dimension][doc_name] = snippets
@@ -1496,7 +1641,11 @@ def compare_documents(
         ),
     }
 
-def find_domain_hints(text: str, max_snippets_per_category: int = 4) -> Dict[str, List[str]]:
+def find_domain_hints(
+    text: str,
+    max_snippets_per_category: int = 4,
+    page_texts: Sequence[str] | None = None,
+) -> Dict[str, List[str]]:
     """Find short snippets related to common materials-science paper sections."""
     sentences = split_sentences(text)
     hints: Dict[str, List[str]] = {}
@@ -1504,9 +1653,8 @@ def find_domain_hints(text: str, max_snippets_per_category: int = 4) -> Dict[str
     for category, keywords in DOMAIN_KEYWORDS.items():
         category_hits = []
         for sentence in sentences:
-            lower_sentence = sentence.lower()
-            if any(keyword in lower_sentence for keyword in keywords):
-                category_hits.append(sentence)
+            if any(_contains_term(sentence, keyword) for keyword in keywords):
+                category_hits.append(_cite_sentence(sentence, page_texts))
             if len(category_hits) >= max_snippets_per_category:
                 break
         hints[category] = category_hits

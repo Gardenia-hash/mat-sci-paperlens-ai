@@ -21,13 +21,14 @@ The interface supports English and Chinese. Chinese mode localizes the UI and an
 - PyMuPDF text extraction and scientific-PDF noise cleanup
 - PDF hard-wrap reconstruction, scientific-abbreviation protection, and incomplete-fragment filtering
 - Five-part **Quick Read** briefs covering research focus, material system, method, result, and limitation
-- Extraction-coverage indicator with source-section labels (clearly separated from scientific confidence)
+- Extraction-coverage indicator with source-section and physical PDF-page labels
 - Section-aware integrated extractive summaries
 - Per-paper or explicitly combined keyword extraction
 - English or Chinese grounded questions against one selected paper or all papers
-- Persistent workspace Q&A with confidence labels, source names, and inline `[E1]` evidence references
+- Persistent workspace Q&A with evidence-strength explanations, source names, inline `[E1]` references, and PDF pages
 - Multi-paper comparison across focus, material, fabrication, characterization, parameters, results, and limitations
-- Per-paper materials-science domain hints
+- Page-cited multi-paper comparisons and materials-science domain hints
+- Boundary-aware scientific-term matching (for example, `ALD` does not match `called`)
 - Local raster-figure extraction with source page, dimensions, format, and nearby caption
 - A dedicated **Figures / 图像解读** tab with explicit paper selection
 - Text-grounded figure interpretation separated into **Direct evidence**, **Reasonable inference**, and **Unknown**
@@ -39,6 +40,8 @@ The interface supports English and Chinese. Chinese mode localizes the UI and an
 
 - Papers are processed separately unless the user explicitly chooses a combined / all-papers mode.
 - Evidence from multiple papers is never presented as if it came from one paper.
+- Evidence strength describes heuristic retrieval support; it is not a probability that a scientific claim is correct.
+- PDF page numbers refer to physical file pages, preserving blank pages so citation offsets do not drift.
 - The baseline works locally and does not require a paid model or API key.
 - Figure interpretation uses the caption and nearby page text only. It does not claim to read plotted values, colors, axes, or visual trends from pixels.
 - Automated output is a reading aid, not a replacement for checking the original paper.
@@ -134,8 +137,8 @@ mat-sci-paperlens-ai/
 - **Quick Read:** complete source sentences answer five first-pass research questions and report extraction coverage without pretending it is a quality score
 - **Summaries:** hard-wrapped PDF lines are rebuilt into complete sentences, then selected evidence is ordered into a readable extractive overview
 - **Keywords:** unigram / bigram TF-IDF features
-- **Grounded QA:** sentence-safe passage retrieval, scored intent detection, relevance filtering, source isolation, document-order integration, and traceable evidence IDs
-- **Comparison:** complete evidence sentences are selected independently per paper and restored to document order
+- **Grounded QA:** page-aware passage retrieval, scored intent detection, relevance filtering, source isolation, evidence-strength explanation, and traceable evidence IDs
+- **Comparison:** boundary-matched complete evidence sentences are selected independently per paper, restored to document order, and cited to physical PDF pages
 - **Figures:** PyMuPDF embedded-image extraction, page-aware metadata, spatially nearest caption association, and text-only interpretation
 
 ## Roadmap
@@ -148,7 +151,7 @@ mat-sci-paperlens-ai/
 - [x] First-run onboarding, processing feedback, caching, and Markdown report export
 - [x] Streamlit Community Cloud configuration and deployment health check
 - [x] Five-part paper brief, persistent Q&A, evidence IDs, and Q&A-aware report export
-- [ ] Page-aware evidence citations for Summary / QA / Compare
+- [x] Page-aware evidence citations for Summary / QA / Compare / Domain Hints
 - [ ] Better multi-column and wrapped-caption association
 - [ ] OCR support for scanned PDFs
 - [ ] Optional visual-model provider behind an explicit configuration switch
